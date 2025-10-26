@@ -24,7 +24,15 @@ except ImportError as e:
     print(f"提示: 可能需要安装依赖，运行: cd lerobot && pip install -e .")
 
 # ==================== 初始化 ====================
-physicsClient = p.connect(p.GUI)
+# 尝试使用 GUI 模式，如果失败则使用 DIRECT 模式
+try:
+    physicsClient = p.connect(p.GUI)
+    print("✓ PyBullet GUI 模式已启动")
+except Exception as e:
+    print(f"⚠️  GUI 模式启动失败: {e}")
+    print("切换到 DIRECT 模式（无可视化窗口）")
+    physicsClient = p.connect(p.DIRECT)
+
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
 p.setGravity(0, 0, -10)
 
@@ -67,9 +75,10 @@ print("控制说明:")
 print("="*80)
 print("1. 输入目标坐标: x y z")
 print("   例如: 0.30 0.10 0.25")
-print("2. 输入 'joint' 显示/设置关节角度")
+print("2. 输入 'circle' 画圆轨迹 ⭐ 新增")
+print("   例如: circle 0.30 0.10 0.25 0.08  (半径8cm)")
+print("3. 输入 'joint' 显示/设置关节角度")
 print("   例如: joint 0 45.0  (设置关节0为45度)")
-print("3. 输入 'raw' 显示原始步进值（校准用）⭐ 新增")
 print("4. 输入 'current' 显示当前位置")
 print("5. 输入 'home' 回到初始位置")
 print("6. 输入 'connect' 连接真实机械臂")
@@ -790,6 +799,156 @@ def set_joint_angles(joint_angles_deg, joint_indices=None):
         return False
 
 
+def draw_circle(center, radius=0.05, steps=50, threshold=0.020, draw_trajectory=True):
+    """
+    让机械臂画圆
+    
+    Args:
+        center: 圆心位置 [x, y, z]
+        radius: 半径（米），默认0.05米=5厘米
+        steps: 圆周上的点数，默认50
+        threshold: 误差阈值（米），默认0.020米=20毫米
+        draw_trajectory: 是否绘制轨迹线，默认True
+    
+    Returns:
+        dict: 统计信息 {'success': 成功点数, 'fail': 失败点数, 'total': 总点数}
+    """
+    print(f"\n" + "="*80)
+    print("开始画圆")
+    print("="*80)
+    print(f"圆心位置: [{center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f}]")
+    print(f"半径: {radius:.3f}米 ({radius*100:.1f}厘米)")
+    print(f"点数: {steps}")
+    print(f"误差阈值: {threshold:.3f}米 ({threshold*1000:.0f}毫米)")
+    print("="*80 + "\n")
+    
+    prevActualPos = None
+    successCount = 0
+    failCount = 0
+    
+    # 存储轨迹点（用于后续分析）
+    trajectory_points = []
+    
+    for step in range(steps):
+        # 计算圆周上的目标点（在XY平面上画圆）
+        angle = 2 * math.pi * step / steps
+        targetPos = [
+            center[0] + radius * math.cos(angle),
+            center[1] + radius * math.sin(angle),
+            center[2]  # Z保持不变
+        ]
+        
+        # 在目标点放置标记（红色小球，每5个点放一个）
+        if draw_trajectory and step % 5 == 0:
+            sphereId = p.createVisualShape(p.GEOM_SPHERE, radius=0.003, 
+                                          rgbaColor=[1, 0, 0, 0.5])
+            p.createMultiBody(baseMass=0, baseVisualShapeIndex=sphereId, 
+                            basePosition=targetPos)
+        
+        # 计算IK
+        jointPoses = p.calculateInverseKinematics(
+            robotId, 
+            endEffectorIndex, 
+            targetPos,
+            maxNumIterations=1000,
+            residualThreshold=0.0001
+        )
+        
+        # 写入真实机械臂
+        if use_real_robot:
+            write_to_real_robot(jointPoses)
+        
+        # 控制仿真机械臂移动
+        for i in range(len(jointPoses)):
+            p.setJointMotorControl2(
+                bodyIndex=robotId,
+                jointIndex=i,
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=jointPoses[i],
+                force=500,
+                maxVelocity=5
+            )
+        
+        # 等待机械臂到达目标
+        maxWaitSteps = 100  # 减少等待步数，加快画圆速度
+        reached = False
+        
+        for waitStep in range(maxWaitSteps):
+            time.sleep(0.01)  # 10ms
+            
+            # 检查是否到达
+            linkState = p.getLinkState(robotId, endEffectorIndex)
+            actualPos = linkState[0]
+            error = math.sqrt(sum((actualPos[i] - targetPos[i])**2 for i in range(3)))
+            
+            if error < threshold:
+                reached = True
+                
+                # 画实际轨迹（绿色线）
+                if draw_trajectory and prevActualPos is not None:
+                    p.addUserDebugLine(prevActualPos, actualPos, [0, 1, 0], 5, lifeTime=0)
+                prevActualPos = actualPos
+                
+                successCount += 1
+                trajectory_points.append({
+                    'target': targetPos,
+                    'actual': actualPos,
+                    'error': error
+                })
+                
+                if step % 10 == 0:
+                    print(f"进度: {step+1}/{steps} ({100*(step+1)/steps:.1f}%) - "
+                          f"到达 (误差{error*1000:.1f}mm)")
+                break
+        
+        if not reached:
+            linkState = p.getLinkState(robotId, endEffectorIndex)
+            actualPos = linkState[0]
+            error = math.sqrt(sum((actualPos[i] - targetPos[i])**2 for i in range(3)))
+            
+            # 即使未完全到达，也画轨迹（黄色线）
+            if draw_trajectory and prevActualPos is not None:
+                p.addUserDebugLine(prevActualPos, actualPos, [1, 1, 0], 3, lifeTime=0)
+            prevActualPos = actualPos
+            
+            failCount += 1
+            trajectory_points.append({
+                'target': targetPos,
+                'actual': actualPos,
+                'error': error
+            })
+            
+            print(f"进度: {step+1}/{steps} - 超时 (误差{error*1000:.1f}mm)")
+    
+    # 完成统计
+    print(f"\n" + "="*80)
+    print("画圆完成！")
+    print("="*80)
+    print(f"成功: {successCount}/{steps} ({100*successCount/steps:.1f}%)")
+    print(f"失败: {failCount}/{steps} ({100*failCount/steps:.1f}%)")
+    
+    # 计算平均误差
+    if trajectory_points:
+        avg_error = sum(p['error'] for p in trajectory_points) / len(trajectory_points)
+        max_error = max(p['error'] for p in trajectory_points)
+        print(f"平均误差: {avg_error*1000:.1f}毫米")
+        print(f"最大误差: {max_error*1000:.1f}毫米")
+    
+    if draw_trajectory:
+        print("\n图例:")
+        print("  🟢 绿色粗线 = 成功到达的轨迹")
+        print("  🟡 黄色细线 = 未完全到达的轨迹")
+        print("  🔴 红色小球 = 目标点标记")
+    print("="*80 + "\n")
+    
+    return {
+        'success': successCount,
+        'fail': failCount,
+        'total': steps,
+        'trajectory': trajectory_points
+    }
+
+
 def move_to_position(targetPos, waitTime=2.0):
     """移动到目标位置（使用迭代式IK提高精度）"""
     print(f"\n目标位置: [{targetPos[0]:.3f}, {targetPos[1]:.3f}, {targetPos[2]:.3f}]")
@@ -942,11 +1101,25 @@ try:
             
             elif user_input == 'home':
                 print("回到初始位置...")
-                for i in range(numJoints):
-                    p.setJointMotorControl2(robotId, i, p.POSITION_CONTROL,
-                                           targetPosition=0, force=500)
-                time.sleep(1.0)
-                print("✅ 已回到初始位置")
+                
+                # 使用 set_joint_angles 函数，它会同时控制仿真和真实机械臂
+                # 所有关节回到 0 度
+                home_angles = [0.0, 0.0, 0.0, 0.0, 0.0]
+                
+                # 调用统一的关节角度设置函数
+                set_joint_angles(home_angles)
+                
+                # 等待机械臂移动到位
+                time.sleep(2.0)
+                
+                # 如果连接了真实机械臂，显示对比信息
+                if use_real_robot:
+                    print("\n" + "="*80)
+                    print("初始位置角度对比:")
+                    print("="*80)
+                    print_angle_comparison(show_header=False)
+                else:
+                    print("✅ 仿真机械臂已回到初始位置")
             
             elif user_input == 'save':
                 linkState = p.getLinkState(robotId, endEffectorIndex)
@@ -1157,6 +1330,58 @@ try:
                 
                 show_raw_steps()
             
+            elif user_input.startswith('circle'):
+                # 画圆命令
+                parts = user_input.split()
+                
+                if len(parts) == 1:
+                    # 使用当前位置作为圆心，默认参数画圆
+                    linkState = p.getLinkState(robotId, endEffectorIndex)
+                    center = list(linkState[0])
+                    print(f"\n使用当前位置作为圆心: [{center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f}]")
+                    print("使用默认参数: 半径=5cm, 50个点")
+                    draw_circle(center)
+                
+                elif len(parts) == 4:
+                    # 指定圆心: circle x y z
+                    try:
+                        center = [float(parts[1]), float(parts[2]), float(parts[3])]
+                        print("使用默认参数: 半径=5cm, 50个点")
+                        draw_circle(center)
+                    except ValueError:
+                        print("❌ 坐标格式错误")
+                
+                elif len(parts) == 5:
+                    # 指定圆心和半径: circle x y z radius
+                    try:
+                        center = [float(parts[1]), float(parts[2]), float(parts[3])]
+                        radius = float(parts[4])
+                        draw_circle(center, radius=radius)
+                    except ValueError:
+                        print("❌ 参数格式错误")
+                
+                elif len(parts) == 6:
+                    # 指定圆心、半径和点数: circle x y z radius steps
+                    try:
+                        center = [float(parts[1]), float(parts[2]), float(parts[3])]
+                        radius = float(parts[4])
+                        steps = int(parts[5])
+                        draw_circle(center, radius=radius, steps=steps)
+                    except ValueError:
+                        print("❌ 参数格式错误")
+                
+                else:
+                    print("\n用法:")
+                    print("  circle                       - 在当前位置画圆（默认半径5cm）")
+                    print("  circle x y z                 - 在指定位置画圆（默认半径5cm）")
+                    print("  circle x y z radius          - 在指定位置画圆（指定半径，单位米）")
+                    print("  circle x y z radius steps    - 在指定位置画圆（指定半径和点数）")
+                    print("\n例如:")
+                    print("  circle                       - 当前位置，半径5cm")
+                    print("  circle 0.30 0.10 0.25        - 指定位置，半径5cm")
+                    print("  circle 0.30 0.10 0.25 0.08   - 指定位置，半径8cm")
+                    print("  circle 0.30 0.10 0.25 0.10 100  - 半径10cm，100个点")
+            
             elif user_input.startswith('joint'):
                 # 关节角度控制命令
                 parts = user_input.split()
@@ -1218,6 +1443,11 @@ try:
                 print("  joint                    - 显示当前关节角度")
                 print("  joint N angle            - 设置关节N的角度（度数）")
                 print("  joint a0 a1 a2 a3 a4     - 设置所有5个关节角度（度数）")
+                print("\n【轨迹控制】⭐ 新增")
+                print("  circle                       - 在当前位置画圆（半径5cm）")
+                print("  circle x y z                 - 在指定位置画圆")
+                print("  circle x y z radius          - 指定半径（米）")
+                print("  circle x y z radius steps    - 指定半径和点数")
                 print("\n【位置管理】")
                 print("  save         - 保存当前位置")
                 print("  load         - 加载最后保存的位置")
@@ -1233,7 +1463,7 @@ try:
                 print("  stop_monitor - 停止实时监控")
                 print("  calibrate    - 自动计算并应用零点偏移")
                 print("  set_offset   - 手动设置零点偏移")
-                print("\n【调试工具】⭐ 新增")
+                print("\n【调试工具】")
                 print("  raw / steps  - 实时显示原始步进值（按Enter保存）")
                 print("\n【其他】")
                 print("  help         - 显示此帮助")

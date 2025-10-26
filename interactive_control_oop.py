@@ -1,0 +1,663 @@
+"""
+一个将 PyBullet 仿真与真实机械臂控制解耦的 OOP 版本，并提供命令行交互层。
+
+核心思想：
+- SimulationInterface 仅负责仿真加载、IK、前向运动学读取与关节下发。
+- RealRobotInterface 仅负责真实机械臂连接、读取角度、下发角度（度）。
+- ArmController 统一调度两者：计算 IK、下发真实机械臂、基于真实角度做到位判定。
+- run_cli 提供简单命令行交互，覆盖 connect/current/home/move 等常用命令。
+
+到位判定逻辑：
+- 若已连接真实机械臂：周期性读取真实关节角（度）→ 转弧度 → 写入仿真关节 → 用仿真 FK 得到末端实际位置 → 与目标做差。
+- 未连接时：回退到仿真到位。
+"""
+
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
+
+import numpy as np
+import pybullet as p
+import pybullet_data
+import torch
+
+try:
+    from lerobot.common.robot_devices.robots.configs import So101RobotConfig
+    from lerobot.common.robot_devices.robots.manipulator import ManipulatorRobot
+
+    LEROBOT_AVAILABLE = True
+except ImportError:
+    ManipulatorRobot = None  # type: ignore[assignment]
+    So101RobotConfig = None  # type: ignore[assignment]
+    LEROBOT_AVAILABLE = False
+
+
+@dataclass
+class ReachResult:
+    reached: bool
+    error: float
+    final_position: Tuple[float, float, float]
+    samples: List[Tuple[float, float, float]]
+
+
+class SimulationInterface:
+    """轻量的仿真封装：暴露 IK、FK（通过 get_end_effector_position）、以及关节控制。
+
+    说明：
+    - 仅收集前 6 个可旋转关节作为“控制关节”（大多数 6 DoF 机械臂）。
+    - end_effector 通过 link 名包含 'gripper_frame' 来查找，找不到则取最后一个 link。
+    """
+
+    def __init__(
+        self,
+        gui: bool = True,
+        urdf_filename: str = "so101_new_calib.urdf",
+        base_position: Sequence[float] = (0.0, 0.0, 0.0),
+        gravity: Sequence[float] = (0.0, 0.0, -10.0),
+    ) -> None:
+        self.client_id = self._connect(gui)
+        self.urdf_path = str(Path(__file__).with_name(urdf_filename))
+        self.base_position = base_position
+        self.gravity = gravity
+
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        p.setGravity(*self.gravity)
+
+        self.plane_id = p.loadURDF("plane.urdf")
+        self.robot_id = p.loadURDF(
+            self.urdf_path,
+            basePosition=self.base_position,
+            baseOrientation=p.getQuaternionFromEuler((0.0, 0.0, 0.0)),
+            useFixedBase=True,
+        )
+
+        self.end_effector_index = self._find_end_effector()
+        self.control_joint_indices = self._collect_control_joints()
+
+    @staticmethod
+    def _connect(gui: bool) -> int:
+        """连接 PyBullet，优先 GUI，失败则回退 DIRECT。"""
+        if gui:
+            try:
+                return p.connect(p.GUI)
+            except Exception:
+                pass
+        return p.connect(p.DIRECT)
+
+    def _find_end_effector(self) -> int:
+        """查找末端执行器的 link 索引。"""
+        end_effector = -1
+        num_joints = p.getNumJoints(self.robot_id)
+        for index in range(num_joints):
+            info = p.getJointInfo(self.robot_id, index)
+            link_name = info[12].decode("utf-8")
+            if "gripper_frame" in link_name.lower():
+                end_effector = index
+                break
+        return end_effector if end_effector >= 0 else num_joints - 1
+
+    def _collect_control_joints(self) -> List[int]:
+        """收集用于控制的关节索引（最多 6 个 REVOLUTE）。"""
+        indices: List[int] = []
+        for index in range(p.getNumJoints(self.robot_id)):
+            joint_type = p.getJointInfo(self.robot_id, index)[2]
+            if joint_type == p.JOINT_REVOLUTE:
+                indices.append(index)
+            if len(indices) == 6:
+                break
+        return indices
+
+    def calculate_ik(self, target_position: Sequence[float]) -> List[float]:
+        """计算 IK，返回所有关节的解（pybullet 的顺序与数量）。"""
+        return list(
+            p.calculateInverseKinematics(
+                self.robot_id,
+                self.end_effector_index,
+                targetPosition=target_position,
+                maxNumIterations=1000,
+                residualThreshold=1e-4,
+            )
+        )
+
+    def command_joint_positions(self, joint_positions: Sequence[float], force: float = 500.0) -> None:
+        """按 pybullet 的关节索引写入目标，带健壮性回退。
+
+        - 优先用 joint_idx 直接取目标；
+        - 若 IK 输出长度小于最大索引，则退化为使用 control 顺序索引；
+        - 仍不足则跳过该关节。
+        """
+        joint_array = list(joint_positions)
+        for offset, joint_idx in enumerate(self.control_joint_indices):
+            if joint_idx < len(joint_array):
+                target = joint_array[joint_idx]
+            elif offset < len(joint_array):
+                target = joint_array[offset]
+            else:
+                # Not enough IK outputs; skip this joint safely.
+                continue
+            p.setJointMotorControl2(
+                bodyIndex=self.robot_id,
+                jointIndex=joint_idx,
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=target,
+                force=force,
+                maxVelocity=5.0,
+            )
+
+    def reset_joint_states(self, joint_positions: Sequence[float]) -> None:
+        """直接重置（不经电机控制）仿真中的控制关节角，用于计算 FK。"""
+        for offset, joint_idx in enumerate(self.control_joint_indices):
+            if offset < len(joint_positions):
+                p.resetJointState(self.robot_id, joint_idx, joint_positions[offset])
+
+    def get_end_effector_position(self) -> Tuple[float, float, float]:
+        """读取末端位姿中的位置（x, y, z）。"""
+        link_state = p.getLinkState(self.robot_id, self.end_effector_index)
+        return tuple(link_state[0])
+
+    def command_control_joint_positions(self, control_joint_positions: Sequence[float], force: float = 500.0) -> None:
+        """仅按“控制关节顺序”（最多 6 个）下发目标角。"""
+        for i, joint_idx in enumerate(self.control_joint_indices):
+            target = control_joint_positions[i] if i < len(control_joint_positions) else 0.0
+            p.setJointMotorControl2(
+                bodyIndex=self.robot_id,
+                jointIndex=joint_idx,
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=float(target),
+                force=force,
+                maxVelocity=5.0,
+            )
+
+    def step(self, steps: int = 1, sleep: float = 1.0 / 240.0) -> None:
+        for _ in range(steps):
+            p.stepSimulation()
+            time.sleep(sleep)
+
+    def shutdown(self) -> None:
+        if p.isConnected(self.client_id):
+            p.disconnect(self.client_id)
+
+
+class RealRobotInterface:
+    """封装与真实机械臂（LeRobot）的读写与连接管理。"""
+
+    def __init__(self, calibration_dir: str, zero_offset_deg: Optional[Sequence[float]] = None) -> None:
+        if not LEROBOT_AVAILABLE:
+            raise RuntimeError("LeRobot is not available; cannot control the physical arm.")
+
+        self.calibration_dir = calibration_dir
+        self.zero_offset_deg = np.zeros(6) if zero_offset_deg is None else np.array(zero_offset_deg, dtype=float)
+        self.robot: Optional[ManipulatorRobot] = None
+        self._follower_name: Optional[str] = None
+
+    @property
+    def is_connected(self) -> bool:
+        return self.robot is not None
+
+    def connect(self) -> None:
+        """建立与 follower 臂的连接并加载校准。"""
+        config = So101RobotConfig(
+            calibration_dir=self.calibration_dir,
+            leader_arms={},
+            cameras={},
+        )
+        self.robot = ManipulatorRobot(config)
+        self.robot.connect()
+        self._follower_name = next(iter(self.robot.follower_arms))
+
+    def disconnect(self, disable_torque: bool = True) -> None:
+        """断开连接，可选禁用力矩（安全）。"""
+        if not self.robot:
+            return
+        if disable_torque:
+            for name in self.robot.follower_arms:
+                try:
+                    self.robot.follower_arms[name].write("Torque_Enable", 0)
+                except Exception:
+                    pass
+        self.robot.disconnect()
+        self.robot = None
+        self._follower_name = None
+
+    def write_goal_positions(self, joint_angles_deg: Sequence[float]) -> None:
+        """写入目标角（度）。长度根据电机数量自动补齐/截断，并加零点偏移。"""
+        if not self.robot or not self._follower_name:
+            raise RuntimeError("Physical arm is not connected.")
+        desired = np.array(joint_angles_deg, dtype=float)
+        follower = self.robot.follower_arms[self._follower_name]
+        motor_count = len(follower.motor_names)
+        if len(desired) < motor_count:
+            desired = np.pad(desired, (0, motor_count - len(desired)), mode="constant")
+        desired = desired[:motor_count]
+        zero_offset = self.zero_offset_deg[:motor_count]
+        if len(zero_offset) < motor_count:
+            zero_offset = np.pad(zero_offset, (0, motor_count - len(zero_offset)), mode="constant")
+        desired += zero_offset
+        command = torch.from_numpy(desired.astype(np.float32))
+        follower.write("Goal_Position", command.numpy())
+
+    def read_joint_positions(self) -> np.ndarray:
+        """读取当前角度（度），长度对齐零点偏移。"""
+        if not self.robot or not self._follower_name:
+            raise RuntimeError("Physical arm is not connected.")
+        follower = self.robot.follower_arms[self._follower_name]
+        present = follower.read("Present_Position")
+        values = np.array(present, dtype=float)
+        zero_offset = self.zero_offset_deg[: len(values)]
+        if len(zero_offset) < len(values):
+            zero_offset = np.pad(zero_offset, (0, len(values) - len(zero_offset)), mode="constant")
+        return values[: len(zero_offset)] - zero_offset
+
+
+class ArmController:
+    """高层控制器：统一使用仿真与真实臂，提供 move_to/直接关节下发等能力。"""
+
+    def __init__(
+        self,
+        use_gui: bool = True,
+        calibration_dir: Optional[str] = None,
+        zero_offset_deg: Optional[Sequence[float]] = None,
+    ) -> None:
+        self.sim = SimulationInterface(gui=use_gui)
+        self.real: Optional[RealRobotInterface] = None
+        self.last_commanded_control_angles_deg: Optional[List[float]] = None
+        if calibration_dir and LEROBOT_AVAILABLE:
+            self.real = RealRobotInterface(calibration_dir, zero_offset_deg)
+
+    def connect_real_robot(self) -> None:
+        if not self.real:
+            raise RuntimeError("Real robot interface was not initialised with a calibration directory.")
+        if not self.real.is_connected:
+            self.real.connect()
+
+    def disconnect_real_robot(self) -> None:
+        if self.real and self.real.is_connected:
+            self.real.disconnect()
+
+    def move_to(
+        self,
+        target_position: Sequence[float],
+        wait_timeout: float = 5.0,
+        tolerance: float = 0.015,
+        poll_interval: float = 0.1,
+    ) -> ReachResult:
+        """移动到目标位姿（仅位置），内部计算 IK 并到位等待。"""
+        target = np.array(target_position, dtype=float)
+        ik_solution = self.sim.calculate_ik(target)
+        control_angles = [
+            ik_solution[idx] for idx in self.sim.control_joint_indices if idx < len(ik_solution)
+        ]
+        # 记录“仿真目标角”（用于对比显示），以度为单位
+        self.last_commanded_control_angles_deg = np.degrees(control_angles).tolist()
+        self.sim.command_control_joint_positions(control_angles)
+
+        samples: List[Tuple[float, float, float]] = []
+        if self.real and self.real.is_connected:
+            if not control_angles:
+                raise RuntimeError("No IK outputs available for the controllable joints.")
+            joint_angles_deg = np.rad2deg(control_angles)
+            self.real.write_goal_positions(joint_angles_deg)
+            result = self._wait_for_real_robot(target, wait_timeout, tolerance, poll_interval, samples)
+        else:
+            result = self._wait_for_simulation(target, wait_timeout, tolerance, poll_interval, samples, ik_solution)
+        return result
+
+    def set_joint_angles_deg(
+        self,
+        joint_angles_deg: Sequence[float],
+        wait_timeout: float = 3.0,
+        tolerance: float = 0.02,
+        poll_interval: float = 0.1,
+    ) -> ReachResult:
+        """直接按控制关节顺序下发角度（度），并等待到位。"""
+        joint_angles_deg = list(joint_angles_deg)
+        # 记录“仿真目标角”（用于对比显示）
+        self.last_commanded_control_angles_deg = joint_angles_deg[:]
+        # Send to real robot (if any)
+        if self.real and self.real.is_connected:
+            self.real.write_goal_positions(joint_angles_deg)
+
+        # Command simulation
+        joint_angles_rad = np.deg2rad(joint_angles_deg).tolist()
+        self.sim.command_control_joint_positions(joint_angles_rad)
+
+        # Define target as the FK from the desired joints (for error calc)
+        # Reset joint states temporarily to compute FK target
+        self.sim.reset_joint_states(joint_angles_rad)
+        target_pos = np.array(self.sim.get_end_effector_position(), dtype=float)
+
+        samples: List[Tuple[float, float, float]] = []
+        if self.real and self.real.is_connected:
+            return self._wait_for_real_robot(target_pos, wait_timeout, tolerance, poll_interval, samples)
+        else:
+            # Use the same commanded values for sim waiting
+            return self._wait_for_simulation(target_pos, wait_timeout, tolerance, poll_interval, samples, joint_angles_rad)
+
+    # ----------------------
+    # 角度对比相关工具方法
+    # ----------------------
+    def get_sim_joint_angles_deg(self) -> List[float]:
+        """读取仿真“目标角”（优先使用最近一次下发的命令），否则读取当前仿真角。"""
+        if self.last_commanded_control_angles_deg is not None:
+            return self.last_commanded_control_angles_deg[:]
+        degs: List[float] = []
+        for joint_idx in self.sim.control_joint_indices:
+            state = p.getJointState(self.sim.robot_id, joint_idx)
+            degs.append(np.degrees(state[0]))
+        return degs
+
+    def get_real_joint_angles_deg(self) -> Optional[List[float]]:
+        """读取真实机械臂的角度（度），长度与控制关节对齐。未连接返回 None。"""
+        if not (self.real and self.real.is_connected):
+            return None
+        real_vals = self.real.read_joint_positions().tolist()
+        n = len(self.sim.control_joint_indices)
+        return real_vals[:n]
+
+    def angle_comparison(self) -> Optional[Tuple[List[str], List[float], List[float], List[float]]]:
+        """返回关节名称、仿真角、真实角与误差（真实-仿真），未连接时返回 None。"""
+        real = self.get_real_joint_angles_deg()
+        if real is None:
+            return None
+        sim = self.get_sim_joint_angles_deg()
+        n = min(len(sim), len(real))
+        sim = sim[:n]
+        real = real[:n]
+        errors = (np.array(real) - np.array(sim)).tolist()
+        names = [p.getJointInfo(self.sim.robot_id, j)[1].decode("utf-8") for j in self.sim.control_joint_indices[:n]]
+        return names, sim, real, errors
+
+    def print_angle_comparison(self) -> None:
+        """打印关节角度对比表。未连接真实机械臂时输出提示。"""
+        data = self.angle_comparison()
+        if data is None:
+            print("(未连接真实机械臂，无法对比关节角)")
+            return
+        names, sim, real, errors = data
+        print("-" * 80)
+        print(f"{'关节名称':20s} | {'目标角(仿真)':>11s} | {'真实角度':>9s} | {'误差':>8s}")
+        print("-" * 80)
+        for i, name in enumerate(names):
+            print(f"{name:20s} | {sim[i]:11.2f}° | {real[i]:9.2f}° | {errors[i]:+7.2f}°")
+        print("-" * 80)
+
+    def move_to_with_live_comparison(
+        self,
+        target_position: Sequence[float],
+        wait_timeout: float = 6.0,
+        tolerance: float = 0.02,
+        poll_interval: float = 0.2,
+    ) -> ReachResult:
+        """移动到位并实时输出关节角对比（若连接真实机械臂）。"""
+        target = np.array(target_position, dtype=float)
+        ik_solution = self.sim.calculate_ik(target)
+        control_angles = [
+            ik_solution[idx] for idx in self.sim.control_joint_indices if idx < len(ik_solution)
+        ]
+        self.last_commanded_control_angles_deg = np.degrees(control_angles).tolist()
+        self.sim.command_control_joint_positions(control_angles)
+
+        samples: List[Tuple[float, float, float]] = []
+
+        # 若未连接真实机械臂，则直接走仿真等待（打印一次对比提示）
+        if not (self.real and self.real.is_connected):
+            print("(未连接真实机械臂，实时对比不可用。)\n")
+            return self._wait_for_simulation(target, wait_timeout, tolerance, poll_interval, samples, ik_solution)
+
+        # 已连接真实机械臂：先写入目标
+        self.real.write_goal_positions(self.last_commanded_control_angles_deg)
+
+        start_time = time.time()
+        last_error = float("inf")
+        last_position = tuple(self.sim.get_end_effector_position())
+
+        print("实时关节角对比：按 Ctrl+C 中断显示\n")
+        try:
+            while time.time() - start_time <= wait_timeout:
+                # 刷新真实角和 FK 位置，注意：这里不改变 last_commanded
+                joint_deg = self.real.read_joint_positions()
+                joint_rad = np.deg2rad(joint_deg)
+                # 用真实角在仿真里计算 FK（会临时覆盖仿真关节状态用于位姿计算）
+                self.sim.reset_joint_states(joint_rad)
+                actual = self.sim.get_end_effector_position()
+                error = float(np.linalg.norm(np.array(actual) - target))
+                last_error = error
+                last_position = actual
+                # 打印对比表
+                names, sim_deg, real_deg, errs = self.angle_comparison() or ([], [], [], [])
+                print("\033[2J\033[H", end="")  # 清屏
+                print(f"目标: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}]  |  误差: {error*1000:.1f} mm")
+                print("-" * 80)
+                print(f"{'关节名称':20s} | {'目标角(仿真)':>11s} | {'真实角度':>9s} | {'误差':>8s}")
+                print("-" * 80)
+                for i, name in enumerate(names):
+                    print(f"{name:20s} | {sim_deg[i]:11.2f}° | {real_deg[i]:9.2f}° | {errs[i]:+7.2f}°")
+                print("-" * 80)
+                if error <= tolerance:
+                    return ReachResult(True, error, actual, samples)
+                time.sleep(poll_interval)
+        except KeyboardInterrupt:
+            pass
+        return ReachResult(False, last_error, last_position, samples)
+
+    def _wait_for_real_robot(
+        self,
+        target: np.ndarray,
+        wait_timeout: float,
+        tolerance: float,
+        poll_interval: float,
+        samples: List[Tuple[float, float, float]],
+    ) -> ReachResult:
+        assert self.real is not None
+        start_time = time.time()
+        last_error = float("inf")
+        last_position = tuple(self.sim.get_end_effector_position())
+
+        while time.time() - start_time <= wait_timeout:
+            joint_deg = self.real.read_joint_positions()
+            joint_rad = np.deg2rad(joint_deg)
+            self.sim.reset_joint_states(joint_rad)
+            actual = self.sim.get_end_effector_position()
+            samples.append(actual)
+            error = float(np.linalg.norm(np.array(actual) - target))
+            last_error = error
+            last_position = actual
+            if error <= tolerance:
+                return ReachResult(True, error, actual, samples)
+            time.sleep(poll_interval)
+        return ReachResult(False, last_error, last_position, samples)
+
+    def _wait_for_simulation(
+        self,
+        target: np.ndarray,
+        wait_timeout: float,
+        tolerance: float,
+        poll_interval: float,
+        samples: List[Tuple[float, float, float]],
+        ik_solution: Sequence[float],
+    ) -> ReachResult:
+        start_time = time.time()
+        last_error = float("inf")
+        last_position = tuple(self.sim.get_end_effector_position())
+
+        while time.time() - start_time <= wait_timeout:
+            self.sim.command_joint_positions(ik_solution)
+            self.sim.step(steps=4, sleep=poll_interval / 4.0)
+            actual = self.sim.get_end_effector_position()
+            samples.append(actual)
+            error = float(np.linalg.norm(np.array(actual) - target))
+            last_error = error
+            last_position = actual
+            if error <= tolerance:
+                return ReachResult(True, error, actual, samples)
+        return ReachResult(False, last_error, last_position, samples)
+
+    def shutdown(self) -> None:
+        self.disconnect_real_robot()
+        self.sim.shutdown()
+
+
+def _format_vec(v: Sequence[float]) -> str:
+    return f"[{v[0]:.3f}, {v[1]:.3f}, {v[2]:.3f}]"
+
+
+def run_cli() -> None:
+    """命令行交互层：复用 ArmController 提供 connect/current/home/move 等命令。"""
+    controller = ArmController(
+        use_gui=True,
+        calibration_dir=str(Path(__file__).parent),
+        zero_offset_deg=[0, 0, 0, 0, 0, 0],
+    )
+    saved_positions: List[List[float]] = []
+
+    print("=" * 80)
+    print("机械臂交互式控制 (OOP 版本)")
+    print("=" * 80)
+    print("支持命令: \n"
+          "  connect                连接真实机械臂\n"
+          "  disconnect             断开真实机械臂\n"
+          "  current                显示当前末端位置（若连接则基于真实角度）\n"
+          "  home                   关节归零（前 N 个控制关节）\n"
+          "  save                   保存当前位置\n"
+          "  list                   列出已保存位置\n"
+          "  goto N                 移动到第 N 个保存位置\n"
+          "  load                   移动到最后一次保存的位置\n"
+          "  move x y z             移动到目标位置（单位 m）\n"
+          "  x y z                  直接输入三数等同于 move\n"
+          "  help                   显示帮助\n"
+          "  quit/exit              退出\n")
+
+    try:
+        while True:
+            cmd = input("\n> ").strip()
+            if not cmd:
+                continue
+            low = cmd.lower()
+
+            if low in ("quit", "exit"):
+                print("退出程序...")
+                break
+
+            if low == "help":
+                print("支持命令: \n"
+          "  connect                连接真实机械臂\n"
+          "  disconnect             断开真实机械臂\n"
+          "  current                显示当前末端位置（若连接则基于真实角度）\n"
+          "  home                   关节归零（前 N 个控制关节）\n"
+          "  save                   保存当前位置\n"
+          "  list                   列出已保存位置\n"
+          "  goto N                 移动到第 N 个保存位置\n"
+          "  load                   移动到最后一次保存的位置\n"
+          "  move x y z             移动到目标位置（单位 m）\n"
+          "  x y z                  直接输入三数等同于 move\n"
+          "  help                   显示帮助\n"
+          "  quit/exit              退出\n")
+                continue
+
+            if low == "connect":
+                try:
+                    controller.connect_real_robot()
+                    print("✅ 真实机械臂已连接（follower 臂）")
+                except Exception as e:
+                    print(f"❌ 连接失败: {e}")
+                continue
+
+            if low == "disconnect":
+                try:
+                    controller.disconnect_real_robot()
+                    print("✅ 真实机械臂已断开")
+                except Exception as e:
+                    print(f"❌ 断开失败: {e}")
+                continue
+
+            if low == "current":
+                try:
+                    if controller.real and controller.real.is_connected:
+                        # 用真实角度刷新仿真后读位置
+                        joint_deg = controller.real.read_joint_positions()
+                        controller.sim.reset_joint_states(np.deg2rad(joint_deg))
+                    pos = controller.sim.get_end_effector_position()
+                    print(f"当前末端位置: {_format_vec(pos)}")
+                except Exception as e:
+                    print(f"❌ 读取失败: {e}")
+                continue
+
+            if low == "home":
+                try:
+                    n = len(controller.sim.control_joint_indices)
+                    result = controller.set_joint_angles_deg([0.0] * n)
+                    status = "到达" if result.reached else "未到达"
+                    print(f"Home: {status}，误差 {result.error*1000:.1f} mm")
+                except Exception as e:
+                    print(f"❌ 执行失败: {e}")
+                continue
+
+            if low == "save":
+                pos = controller.sim.get_end_effector_position()
+                saved_positions.append(list(pos))
+                print(f"✅ 已保存位置 #{len(saved_positions)}: {_format_vec(pos)}")
+                continue
+
+            if low == "list":
+                if not saved_positions:
+                    print("没有保存的位置")
+                else:
+                    for i, pos in enumerate(saved_positions, 1):
+                        print(f"  {i}. {_format_vec(pos)}")
+                continue
+
+            if low.startswith("goto "):
+                parts = low.split()
+                if len(parts) == 2 and parts[1].isdigit():
+                    idx = int(parts[1]) - 1
+                    if 0 <= idx < len(saved_positions):
+                        target = saved_positions[idx]
+                        result = controller.move_to_with_live_comparison(target)
+                        status = "到达" if result.reached else "未到达"
+                        print(f"Move: {status}，误差 {result.error*1000:.1f} mm")
+                    else:
+                        print(f"错误: 位置编号需要在 1-{len(saved_positions)} 之间")
+                else:
+                    print("用法: goto N")
+                continue
+
+            if low == "load":
+                if not saved_positions:
+                    print("没有保存的位置")
+                else:
+                    target = saved_positions[-1]
+                    result = controller.move_to_with_live_comparison(target)
+                    status = "到达" if result.reached else "未到达"
+                    print(f"Move: {status}，误差 {result.error*1000:.1f} mm")
+                continue
+
+            def try_parse_xyz(text: str) -> Optional[Tuple[float, float, float]]:
+                parts = text.strip().split()
+                if len(parts) == 3:
+                    try:
+                        return float(parts[0]), float(parts[1]), float(parts[2])
+                    except ValueError:
+                        return None
+                if len(parts) == 4 and parts[0] == "move":
+                    try:
+                        return float(parts[1]), float(parts[2]), float(parts[3])
+                    except ValueError:
+                        return None
+                return None
+
+            xyz = try_parse_xyz(cmd)
+            if xyz is not None:
+                # 使用实时对比版本
+                result = controller.move_to_with_live_comparison(xyz)
+                status = "到达" if result.reached else "未到达"
+                print(f"Target: {_format_vec(xyz)} | {status} | 误差 {result.error*1000:.1f} mm")
+                continue
+
+            print("无法识别的命令，输入 help 查看帮助")
+    finally:
+        controller.shutdown()
+
+
+if __name__ == "__main__":
+    run_cli()
