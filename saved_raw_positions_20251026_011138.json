@@ -1,0 +1,29 @@
+[
+  {
+    "timestamp": "2025-10-26 01:11:38",
+    "raw_steps": [
+      2019,
+      2005,
+      2084,
+      2062,
+      2077,
+      1887
+    ],
+    "calibrated_angles": [
+      -2.63671875,
+      91.318359375,
+      94.39453125,
+      -0.703125,
+      0.791015625,
+      -0.5097705721855164
+    ],
+    "motor_names": [
+      "shoulder_pan",
+      "shoulder_lift",
+      "elbow_flex",
+      "wrist_flex",
+      "wrist_roll",
+      "gripper"
+    ]
+  }
+]
