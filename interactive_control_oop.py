@@ -16,6 +16,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
+import threading
+import sys as _sys
+import subprocess
+import socket
+import json
+from threading import Event
 
 import numpy as np
 import pybullet as p
@@ -190,6 +196,7 @@ class RealRobotInterface:
         self.zero_offset_deg = np.zeros(6) if zero_offset_deg is None else np.array(zero_offset_deg, dtype=float)
         self.robot: Optional[ManipulatorRobot] = None
         self._follower_name: Optional[str] = None
+        self._io_lock = threading.Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -202,9 +209,10 @@ class RealRobotInterface:
             leader_arms={},
             cameras={},
         )
-        self.robot = ManipulatorRobot(config)
-        self.robot.connect()
-        self._follower_name = next(iter(self.robot.follower_arms))
+        with self._io_lock:
+            self.robot = ManipulatorRobot(config)
+            self.robot.connect()
+            self._follower_name = next(iter(self.robot.follower_arms))
 
     def disconnect(self, disable_torque: bool = True) -> None:
         """断开连接，可选禁用力矩（安全）。"""
@@ -213,11 +221,13 @@ class RealRobotInterface:
         if disable_torque:
             for name in self.robot.follower_arms:
                 try:
-                    self.robot.follower_arms[name].write("Torque_Enable", 0)
+                    with self._io_lock:
+                        self.robot.follower_arms[name].write("Torque_Enable", 0)
                 except Exception:
                     pass
-        self.robot.disconnect()
-        self.robot = None
+        with self._io_lock:
+            self.robot.disconnect()
+            self.robot = None
         self._follower_name = None
 
     def write_goal_positions(self, joint_angles_deg: Sequence[float]) -> None:
@@ -235,14 +245,16 @@ class RealRobotInterface:
             zero_offset = np.pad(zero_offset, (0, motor_count - len(zero_offset)), mode="constant")
         desired += zero_offset
         command = torch.from_numpy(desired.astype(np.float32))
-        follower.write("Goal_Position", command.numpy())
+        with self._io_lock:
+            follower.write("Goal_Position", command.numpy())
 
     def read_joint_positions(self) -> np.ndarray:
         """读取当前角度（度），长度对齐零点偏移。"""
         if not self.robot or not self._follower_name:
             raise RuntimeError("Physical arm is not connected.")
         follower = self.robot.follower_arms[self._follower_name]
-        present = follower.read("Present_Position")
+        with self._io_lock:
+            present = follower.read("Present_Position")
         values = np.array(present, dtype=float)
         zero_offset = self.zero_offset_deg[: len(values)]
         if len(zero_offset) < len(values):
@@ -389,7 +401,11 @@ class ArmController:
         tolerance: float = 0.02,
         poll_interval: float = 0.2,
     ) -> ReachResult:
-        """移动到位并实时输出关节角对比（若连接真实机械臂）。"""
+        """移动到位并实时输出关节角对比（若连接真实机械臂）。
+
+        说明：本方法不做闭环微调，只在开始时下发一次目标，随后实时显示真实角与误差，
+        当误差小于阈值或超时结束。
+        """
         target = np.array(target_position, dtype=float)
         ik_solution = self.sim.calculate_ik(target)
         control_angles = [
@@ -405,7 +421,7 @@ class ArmController:
             print("(未连接真实机械臂，实时对比不可用。)\n")
             return self._wait_for_simulation(target, wait_timeout, tolerance, poll_interval, samples, ik_solution)
 
-        # 已连接真实机械臂：先写入目标
+        # 已连接真实机械臂：写入一次目标
         self.real.write_goal_positions(self.last_commanded_control_angles_deg)
 
         start_time = time.time()
@@ -415,24 +431,25 @@ class ArmController:
         print("实时关节角对比：按 Ctrl+C 中断显示\n")
         try:
             while time.time() - start_time <= wait_timeout:
-                # 刷新真实角和 FK 位置，注意：这里不改变 last_commanded
-                joint_deg = self.real.read_joint_positions()
-                joint_rad = np.deg2rad(joint_deg)
-                # 用真实角在仿真里计算 FK（会临时覆盖仿真关节状态用于位姿计算）
-                self.sim.reset_joint_states(joint_rad)
+                # 刷新真实角 → 用仿真 FK 计算末端误差
+                joint_deg_full = self.real.read_joint_positions()
+                n_ctrl = len(self.sim.control_joint_indices)
+                real_deg_now = joint_deg_full[:n_ctrl]
+                self.sim.reset_joint_states(np.deg2rad(real_deg_now))
                 actual = self.sim.get_end_effector_position()
                 error = float(np.linalg.norm(np.array(actual) - target))
                 last_error = error
                 last_position = actual
+
                 # 打印对比表
-                names, sim_deg, real_deg, errs = self.angle_comparison() or ([], [], [], [])
+                names, sim_deg, real_deg_show, errs = self.angle_comparison() or ([], [], [], [])
                 print("\033[2J\033[H", end="")  # 清屏
                 print(f"目标: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}]  |  误差: {error*1000:.1f} mm")
                 print("-" * 80)
                 print(f"{'关节名称':20s} | {'目标角(仿真)':>11s} | {'真实角度':>9s} | {'误差':>8s}")
                 print("-" * 80)
                 for i, name in enumerate(names):
-                    print(f"{name:20s} | {sim_deg[i]:11.2f}° | {real_deg[i]:9.2f}° | {errs[i]:+7.2f}°")
+                    print(f"{name:20s} | {sim_deg[i]:11.2f}° | {real_deg_show[i]:9.2f}° | {errs[i]:+7.2f}°")
                 print("-" * 80)
                 if error <= tolerance:
                     return ReachResult(True, error, actual, samples)
@@ -501,19 +518,7 @@ class ArmController:
 def _format_vec(v: Sequence[float]) -> str:
     return f"[{v[0]:.3f}, {v[1]:.3f}, {v[2]:.3f}]"
 
-
-def run_cli() -> None:
-    """命令行交互层：复用 ArmController 提供 connect/current/home/move 等命令。"""
-    controller = ArmController(
-        use_gui=True,
-        calibration_dir=str(Path(__file__).parent),
-        zero_offset_deg=[0, 0, 0, 0, 0, 0],
-    )
-    saved_positions: List[List[float]] = []
-
-    print("=" * 80)
-    print("机械臂交互式控制 (OOP 版本)")
-    print("=" * 80)
+def help_message() -> None:
     print("支持命令: \n"
           "  connect                连接真实机械臂\n"
           "  disconnect             断开真实机械臂\n"
@@ -525,8 +530,83 @@ def run_cli() -> None:
           "  load                   移动到最后一次保存的位置\n"
           "  move x y z             移动到目标位置（单位 m）\n"
           "  x y z                  直接输入三数等同于 move\n"
+          "  metrics start [interval] [window]  启动实时波形GUI (默认 0.1s / 20s)\n"
+          "  metrics stop                      关闭实时波形GUI\n"
           "  help                   显示帮助\n"
           "  quit/exit              退出\n")
+
+
+def run_cli() -> None:
+    """命令行交互层：复用 ArmController 提供 connect/current/home/move 等命令。"""
+    controller = ArmController(
+        use_gui=True,
+        calibration_dir=str(Path(__file__).parent),
+        zero_offset_deg=[0, 0, 0, 0, 0, 0],
+    )
+    saved_positions: List[List[float]] = []
+    # 实时波形 GUI 子进程（避免后端要求在主线程更新 GUI 的限制）
+    metrics_proc: Optional[subprocess.Popen] = None
+    telemetry_thread: Optional[threading.Thread] = None
+    telemetry_stop = Event()
+    TELEMETRY_PORT = 8765
+
+    def telemetry_loop():
+        # 简单 TCP 服务器：每次仅服务一个客户端，JSONL 推送
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", TELEMETRY_PORT))
+        srv.listen(1)
+        try:
+            while not telemetry_stop.is_set():
+                srv.settimeout(0.5)
+                try:
+                    conn, _ = srv.accept()
+                except socket.timeout:
+                    continue
+                with conn:
+                    f = conn.makefile("w")
+                    # 初次发送名称
+                    try:
+                        if controller.real and controller.real.is_connected:
+                            follower = next(iter(controller.real.robot.follower_arms.values()))  # type: ignore
+                            names = list(follower.motor_names)
+                        else:
+                            names = []
+                        header = {"names": names}
+                        f.write(json.dumps(header) + "\n"); f.flush()
+                        while not telemetry_stop.is_set():
+                            if not (controller.real and controller.real.is_connected):
+                                break
+                            follower = next(iter(controller.real.robot.follower_arms.values()))  # type: ignore
+                            # 串口访问必须串行化：使用 RealRobotInterface 的 IO 锁
+                            with controller.real._io_lock:  # type: ignore[attr-defined]
+                                if hasattr(follower, "read_decoded"):
+                                    load = follower.read_decoded("Present_Load")
+                                    speed = follower.read_decoded("Present_Speed")
+                                else:
+                                    load = follower.read("Present_Load")
+                                    speed = follower.read("Present_Speed")
+                                current = follower.read("Present_Current")
+                                position = follower.read("Present_Position")
+                            pkt = {
+                                "load": list(map(float, load)),
+                                "current": list(map(float, current)),
+                                "position": list(map(float, position)),
+                                "speed": list(map(float, speed)),
+                            }
+                            f.write(json.dumps(pkt) + "\n"); f.flush()
+                            if telemetry_stop.wait(0.1):
+                                break
+                    except Exception:
+                        # 客户端异常断开，继续等待下一个连接
+                        pass
+        finally:
+            srv.close()
+
+    print("=" * 80)
+    print("机械臂交互式控制 (OOP 版本)")
+    print("=" * 80)
+    help_message()
 
     try:
         while True:
@@ -540,19 +620,7 @@ def run_cli() -> None:
                 break
 
             if low == "help":
-                print("支持命令: \n"
-          "  connect                连接真实机械臂\n"
-          "  disconnect             断开真实机械臂\n"
-          "  current                显示当前末端位置（若连接则基于真实角度）\n"
-          "  home                   关节归零（前 N 个控制关节）\n"
-          "  save                   保存当前位置\n"
-          "  list                   列出已保存位置\n"
-          "  goto N                 移动到第 N 个保存位置\n"
-          "  load                   移动到最后一次保存的位置\n"
-          "  move x y z             移动到目标位置（单位 m）\n"
-          "  x y z                  直接输入三数等同于 move\n"
-          "  help                   显示帮助\n"
-          "  quit/exit              退出\n")
+                help_message()
                 continue
 
             if low == "connect":
@@ -565,10 +633,84 @@ def run_cli() -> None:
 
             if low == "disconnect":
                 try:
+                    # 断开前关闭波形 GUI 子进程
+                    if metrics_proc is not None and metrics_proc.poll() is None:
+                        try:
+                            metrics_proc.terminate()
+                            metrics_proc.wait(timeout=2.0)
+                        except Exception:
+                            try:
+                                metrics_proc.kill()
+                            except Exception:
+                                pass
+                        metrics_proc = None
                     controller.disconnect_real_robot()
                     print("✅ 真实机械臂已断开")
                 except Exception as e:
                     print(f"❌ 断开失败: {e}")
+                continue
+
+            if low.startswith("metrics"):
+                parts = low.split()
+                if len(parts) >= 2 and parts[1] == "start":
+                    if not (controller.real and controller.real.is_connected):
+                        print("⚠️ 请先 connect 连接真实机械臂后再启动波形GUI")
+                        continue
+                    if metrics_proc is not None and metrics_proc.poll() is None:
+                        print("⚠️ 实时波形GUI已在运行")
+                        continue
+                    try:
+                        interval = float(parts[2]) if len(parts) >= 3 else 0.1
+                        window = float(parts[3]) if len(parts) >= 4 else 20.0
+                    except ValueError:
+                        print("用法: metrics start [interval] [window]")
+                        continue
+                    # 启动遥测服务线程（共享本连接，避免串口竞争）
+                    if telemetry_thread is None or not telemetry_thread.is_alive():
+                        telemetry_stop.clear()
+                        telemetry_thread = threading.Thread(target=telemetry_loop, daemon=True)
+                        telemetry_thread.start()
+                    # 启动独立进程运行 viewer（TCP 客户端模式）
+                    viewer_path = str(Path(__file__).with_name("realtime_metrics_viewer.py"))
+                    calib_dir = str(Path(__file__).parent)
+                    cmd = [
+                        _sys.executable,
+                        viewer_path,
+                        "--mode", "tcp",
+                        "--host", "127.0.0.1",
+                        "--port", str(TELEMETRY_PORT),
+                        "--interval",
+                        str(interval),
+                        "--window",
+                        str(window),
+                    ]
+                    try:
+                        metrics_proc = subprocess.Popen(cmd)
+                    except Exception as e:
+                        print(f"❌ 启动波形GUI失败: {e}")
+                        metrics_proc = None
+                        continue
+                    print(f"✅ 已启动实时波形GUI interval={interval}s, window={window}s")
+                elif len(parts) >= 2 and parts[1] == "stop":
+                    if metrics_proc is None or metrics_proc.poll() is not None:
+                        print("⚠️ 实时波形GUI未运行")
+                    else:
+                        try:
+                            metrics_proc.terminate()
+                            metrics_proc.wait(timeout=2.0)
+                        except Exception:
+                            try:
+                                metrics_proc.kill()
+                            except Exception:
+                                pass
+                        metrics_proc = None
+                        telemetry_stop.set()
+                        if telemetry_thread and telemetry_thread.is_alive():
+                            telemetry_thread.join(timeout=2.0)
+                        telemetry_thread = None
+                        print("✅ 已关闭实时波形GUI")
+                else:
+                    print("用法: metrics start [interval] [window] | metrics stop")
                 continue
 
             if low == "current":
@@ -652,10 +794,23 @@ def run_cli() -> None:
                 result = controller.move_to_with_live_comparison(xyz)
                 status = "到达" if result.reached else "未到达"
                 print(f"Target: {_format_vec(xyz)} | {status} | 误差 {result.error*1000:.1f} mm")
+                
                 continue
 
             print("无法识别的命令，输入 help 查看帮助")
     finally:
+        try:
+            if metrics_proc is not None and metrics_proc.poll() is None:
+                metrics_proc.terminate()
+                try:
+                    metrics_proc.wait(timeout=2.0)
+                except Exception:
+                    metrics_proc.kill()
+            telemetry_stop.set()
+            if telemetry_thread and telemetry_thread.is_alive():
+                telemetry_thread.join(timeout=2.0)
+        except Exception:
+            pass
         controller.shutdown()
 
 
