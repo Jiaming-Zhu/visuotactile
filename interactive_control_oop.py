@@ -213,6 +213,15 @@ class RealRobotInterface:
             self.robot = ManipulatorRobot(config)
             self.robot.connect()
             self._follower_name = next(iter(self.robot.follower_arms))
+            # 启动即设为最大加速度/速度（满速），保证交互顺畅
+            # try:
+            #     follower = self.robot.follower_arms[self._follower_name]
+            #     follower.write("Acceleration", 254)   # 建议最大值
+            #     follower.write("Goal_Speed", 1023)    # 100% 速度幅值
+            # except Exception:
+            #     # 某些固件/接口不支持时忽略
+            #     pass
+
 
     def disconnect(self, disable_torque: bool = True) -> None:
         """断开连接，可选禁用力矩（安全）。"""
@@ -532,6 +541,8 @@ def help_message() -> None:
           "  x y z                  直接输入三数等同于 move\n"
           "  metrics start [interval] [window]  启动实时波形GUI (默认 0.1s / 20s)\n"
           "  metrics stop                      关闭实时波形GUI\n"
+          "  veldebug start [interval]        开启速度调试输出（符号位/幅值/解码）\n"
+          "  veldebug stop                    停止速度调试输出\n"
           "  help                   显示帮助\n"
           "  quit/exit              退出\n")
 
@@ -549,6 +560,10 @@ def run_cli() -> None:
     telemetry_thread: Optional[threading.Thread] = None
     telemetry_stop = Event()
     TELEMETRY_PORT = 8765
+    # 速度调试线程
+    veldebug_thread: Optional[threading.Thread] = None
+    veldebug_stop = Event()
+    veldebug_interval = 0.2
 
     def telemetry_loop():
         # 简单 TCP 服务器：每次仅服务一个客户端，JSONL 推送
@@ -574,25 +589,66 @@ def run_cli() -> None:
                             names = []
                         header = {"names": names}
                         f.write(json.dumps(header) + "\n"); f.flush()
+                        # 速度：同时采集 raw_bit15（寄存器原始速度解码为 deg/s）与由位置导数计算的 deg/s
+                        prev_pos_arr = None
+                        prev_t = None
                         while not telemetry_stop.is_set():
                             if not (controller.real and controller.real.is_connected):
                                 break
                             follower = next(iter(controller.real.robot.follower_arms.values()))  # type: ignore
                             # 串口访问必须串行化：使用 RealRobotInterface 的 IO 锁
                             with controller.real._io_lock:  # type: ignore[attr-defined]
-                                if hasattr(follower, "read_decoded"):
-                                    load = follower.read_decoded("Present_Load")
-                                    speed = follower.read_decoded("Present_Speed")
-                                else:
-                                    load = follower.read("Present_Load")
-                                    speed = follower.read("Present_Speed")
-                                current = follower.read("Present_Current")
+                                load = (
+                                    follower.read_decoded("Present_Load")
+                                    if hasattr(follower, "read_decoded")
+                                    else follower.read("Present_Load")
+                                )
+                                current = (
+                                    follower.read_decoded("Present_Current")
+                                    if hasattr(follower, "read_decoded")
+                                    else follower.read("Present_Current")
+                                )
                                 position = follower.read("Present_Position")
+                                speed_raw_words = follower.read("Present_Speed")
+                            # 由位置导数估计速度（deg/s）
+                            now_t = time.perf_counter()
+                            pos_arr = np.asarray(position, dtype=np.float32)
+                            if prev_pos_arr is None or prev_t is None:
+                                speed_deg = np.zeros_like(pos_arr)
+                            else:
+                                dt = now_t - float(prev_t)
+                                if dt <= 1e-6:
+                                    speed_deg = np.zeros_like(pos_arr)
+                                else:
+                                    speed_deg = (pos_arr - prev_pos_arr) / dt
+                            prev_pos_arr = pos_arr
+                            prev_t = now_t
+
+                            # 原始寄存器速度 raw_bit15 → 带符号计数/秒，再按每路分辨率换算成 deg/s
+                            raw_arr = np.asarray(speed_raw_words, dtype=np.int32)
+                            neg = (raw_arr & 0x8000) != 0
+                            mag = (raw_arr & 0x7FFF).astype(np.int32)
+                            signed_counts = np.where(neg, -mag, mag).astype(np.float32)
+                            # 逐电机分辨率
+                            try:
+                                names_local = list(follower.motor_names)
+                                res_list = []
+                                for nm in names_local:
+                                    idx, model = follower.motors[nm]
+                                    res_list.append(float(getattr(follower, "model_resolution", {}).get(model, 4096)))
+                                res = np.asarray(res_list, dtype=np.float32)
+                            except Exception:
+                                res = np.full_like(signed_counts, 4096.0, dtype=np.float32)
+                            speed_deg_raw = signed_counts / res * 360.0
+
                             pkt = {
                                 "load": list(map(float, load)),
                                 "current": list(map(float, current)),
                                 "position": list(map(float, position)),
-                                "speed": list(map(float, speed)),
+                                # 实时显示使用 raw_bit15（寄存器解码）的速度
+                                "speed": list(map(float, speed_deg_raw)),
+                                # 同时传递导数速度，便于外部对照或后续需求
+                                "speed_derived": list(map(float, speed_deg)),
                             }
                             f.write(json.dumps(pkt) + "\n"); f.flush()
                             if telemetry_stop.wait(0.1):
@@ -602,6 +658,58 @@ def run_cli() -> None:
                         pass
         finally:
             srv.close()
+
+    def veldebug_loop():
+        print("[veldebug] 速度调试已开启：raw_bit15 与 由位置导数 的速度 (deg/s)")
+        prev_pos = None
+        prev_t = None
+        while not veldebug_stop.is_set():
+            try:
+                if not (controller.real and controller.real.is_connected):
+                    print("[veldebug] 未连接真实机械臂")
+                    if veldebug_stop.wait(1.0):
+                        break
+                    continue
+                assert controller.real and controller.real.robot is not None
+                follower = next(iter(controller.real.robot.follower_arms.values()))
+                names = list(follower.motor_names)
+                with controller.real._io_lock:  # type: ignore[attr-defined]
+                    pos = follower.read("Present_Position")
+                    speed_raw_words = follower.read("Present_Speed")
+                now = time.perf_counter()
+                pos_arr = np.asarray(pos, dtype=np.float32)
+                if prev_pos is None or prev_t is None:
+                    vel = np.zeros_like(pos_arr)
+                else:
+                    dt = now - float(prev_t)
+                    if dt <= 1e-6:
+                        vel = np.zeros_like(pos_arr)
+                    else:
+                        vel = (pos_arr - prev_pos) / dt
+                prev_pos = pos_arr
+                prev_t = now
+
+                # raw_bit15 速度
+                raw_arr = np.asarray(speed_raw_words, dtype=np.int32)
+                neg = (raw_arr & 0x8000) != 0
+                mag = (raw_arr & 0x7FFF).astype(np.int32)
+                signed_counts = np.where(neg, -mag, mag).astype(np.float32)
+                try:
+                    res_list = []
+                    for nm in names:
+                        _, model = follower.motors[nm]
+                        res_list.append(float(getattr(follower, "model_resolution", {}).get(model, 4096)))
+                    res = np.asarray(res_list, dtype=np.float32)
+                except Exception:
+                    res = np.full_like(signed_counts, 4096.0, dtype=np.float32)
+                vel_raw = signed_counts / res * 360.0
+                print("-" * 80)
+                for i, nm in enumerate(names):
+                    print(f"{nm:16s} | pos={pos_arr[i]:8.3f} deg | raw_bit15={vel_raw[i]:+9.3f} deg/s | deriv={vel[i]:+9.3f} deg/s")
+            except Exception as e:
+                print(f"[veldebug] 读取失败: {e}")
+            if veldebug_stop.wait(veldebug_interval):
+                break
 
     print("=" * 80)
     print("机械臂交互式控制 (OOP 版本)")
@@ -627,6 +735,29 @@ def run_cli() -> None:
                 try:
                     controller.connect_real_robot()
                     print("✅ 真实机械臂已连接（follower 臂）")
+                    # 调试：自动以 10Hz 启动 metrics（如未启动）
+                    if metrics_proc is None or metrics_proc.poll() is not None:
+                        # 启动遥测线程
+                        if telemetry_thread is None or not telemetry_thread.is_alive():
+                            telemetry_stop.clear()
+                            telemetry_thread = threading.Thread(target=telemetry_loop, daemon=True)
+                            telemetry_thread.start()
+                        # 启动 viewer 进程（TCP 客户端）
+                        viewer_path = str(Path(__file__).with_name("realtime_metrics_viewer.py"))
+                        cmd = [
+                            _sys.executable,
+                            viewer_path,
+                            "--mode", "tcp",
+                            "--host", "127.0.0.1",
+                            "--port", str(TELEMETRY_PORT),
+                            "--interval", "0.1",
+                            "--window", "20",
+                        ]
+                        try:
+                            metrics_proc = subprocess.Popen(cmd)
+                            print("ℹ️ 已自动启动实时波形GUI (10Hz)")
+                        except Exception as e:
+                            print(f"⚠️ 无法自动启动波形GUI: {e}")
                 except Exception as e:
                     print(f"❌ 连接失败: {e}")
                 continue
@@ -711,6 +842,34 @@ def run_cli() -> None:
                         print("✅ 已关闭实时波形GUI")
                 else:
                     print("用法: metrics start [interval] [window] | metrics stop")
+                continue
+
+            # 速度调试：开启/停止
+            if low.startswith("veldebug"):
+                parts = low.split()
+                if len(parts) >= 2 and parts[1] == "start":
+                    if len(parts) >= 3:
+                        try:
+                            veldebug_interval = max(0.02, float(parts[2]))
+                        except ValueError:
+                            print("interval 参数无效，使用默认 0.2s")
+                            veldebug_interval = 0.2
+                    if veldebug_thread and veldebug_thread.is_alive():
+                        print("veldebug 已在运行")
+                    else:
+                        veldebug_stop.clear()
+                        veldebug_thread = threading.Thread(target=veldebug_loop, daemon=True)
+                        veldebug_thread.start()
+                        print(f"veldebug started (interval={veldebug_interval}s)")
+                elif len(parts) >= 2 and parts[1] == "stop":
+                    if veldebug_thread and veldebug_thread.is_alive():
+                        veldebug_stop.set()
+                        veldebug_thread.join(timeout=2.0)
+                        print("veldebug stopped")
+                    else:
+                        print("veldebug 未在运行")
+                else:
+                    print("用法: veldebug start [interval] | veldebug stop")
                 continue
 
             if low == "current":
@@ -809,6 +968,9 @@ def run_cli() -> None:
             telemetry_stop.set()
             if telemetry_thread and telemetry_thread.is_alive():
                 telemetry_thread.join(timeout=2.0)
+            veldebug_stop.set()
+            if veldebug_thread and veldebug_thread.is_alive():
+                veldebug_thread.join(timeout=2.0)
         except Exception:
             pass
         controller.shutdown()

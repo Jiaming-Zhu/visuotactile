@@ -218,13 +218,18 @@ def main() -> None:
         import socket
         import json
         plt.ion()
-        try:
-            with socket.create_connection((args.host, args.port)) as sock:
-                # 初始化一个简化 viewer（不占用串口）
-                viewer = RealTimeMetricsViewer(None, args.interval, args.window, reader=None)
-                # 标记为不自连，构造最小化对象需要绕开 __init__ 的断言
-        except Exception:
-            pass
+        # 等待服务器就绪（最多 10 秒）
+        start_wait = time.time()
+        sock = None
+        while time.time() - start_wait < 10.0:
+            try:
+                sock = socket.create_connection((args.host, args.port))
+                break
+            except OSError:
+                time.sleep(0.2)
+        if sock is None:
+            print(f"无法连接到遥测服务器 {args.host}:{args.port}，请先启动提供端（metrics 线程）。")
+            return
 
         # 简化：直接创建绘图结构（不依赖 RealRobotInterface）
         fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
@@ -266,7 +271,7 @@ def main() -> None:
                 ax.legend(loc="upper left", ncol=min(n, 4), fontsize=8)
 
         try:
-            with socket.create_connection((args.host, args.port)) as sock:
+            with sock:
                 sock_file = sock.makefile("r")
                 while True:
                     line = sock_file.readline()
