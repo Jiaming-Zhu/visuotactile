@@ -735,6 +735,33 @@ def run_cli() -> None:
                 try:
                     controller.connect_real_robot()
                     print("✅ 真实机械臂已连接（follower 臂）")
+                    # 连接成功后：导出一次当前控制表（等效于运行 find_defaultSetting.py）
+                    try:
+                        # 动态按文件路径加载同目录下的 find_defaultSetting.py，避免包导入问题
+                        import importlib.util as _ilu
+                        _fds_path = Path(__file__).with_name("find_defaultSetting.py")
+                        spec = _ilu.spec_from_file_location("find_defaultSetting", str(_fds_path))
+                        if spec is None or spec.loader is None:
+                            raise ImportError(f"spec not found for {_fds_path}")
+                        _fds = _ilu.module_from_spec(spec)
+                        spec.loader.exec_module(_fds)  # type: ignore[attr-defined]
+                        result = {"arms": {}}
+                        # 读取 follower 与（若存在）leader 的控制表
+                        if controller.real and controller.real.robot is not None:
+                            # 使用相同串口连接，避免重复连接导致冲突
+                            with controller.real._io_lock:  # type: ignore[attr-defined]
+                                for name, bus in controller.real.robot.follower_arms.items():  # type: ignore
+                                    result["arms"][f"follower:{name}"] = _fds._read_all_from_bus(bus)  # type: ignore[attr-defined]
+                                for name, bus in controller.real.robot.leader_arms.items():  # type: ignore
+                                    result["arms"][f"leader:{name}"] = _fds._read_all_from_bus(bus)  # type: ignore[attr-defined]
+                        out_dir = Path(__file__).parent / "outputs"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        out_path = out_dir / f"default_settings_{int(time.time())}.json"
+                        with open(out_path, "w", encoding="utf-8") as f:
+                            json.dump(result, f, ensure_ascii=False, indent=2)
+                        print(f"ℹ️ 已导出当前控制表到 {out_path}")
+                    except Exception as ee:
+                        print(f"⚠️ 控制表导出失败：{ee}")
                     # 调试：自动以 10Hz 启动 metrics（如未启动）
                     if metrics_proc is None or metrics_proc.poll() is not None:
                         # 启动遥测线程
@@ -843,6 +870,112 @@ def run_cli() -> None:
                 else:
                     print("用法: metrics start [interval] [window] | metrics stop")
                 continue
+
+            # PID 调参：pid get [joint] | pid set (all|joint) P I D
+            if low.startswith("pid"):
+                parts = cmd.split()
+                if not (controller.real and controller.real.is_connected):
+                    print("⚠️ 未连接真实机械臂，无法设置/读取 PID")
+                    continue
+                # 取 follower 总线
+                try:
+                    follower_bus = next(iter(controller.real.robot.follower_arms.values()))  # type: ignore
+                except Exception:
+                    print("❌ 未找到 follower 总线")
+                    continue
+                bus_mod = getattr(follower_bus.__class__, "__module__", "")
+                is_feetech = "feetech" in bus_mod
+                is_dynamixel = "dynamixel" in bus_mod
+                if len(parts) >= 2 and parts[1] == "get":
+                    joint = parts[2] if len(parts) >= 3 else None
+                    try:
+                        if is_feetech:
+                            if joint:
+                                pval = follower_bus.read("P_Coefficient", joint)
+                                ival = follower_bus.read("I_Coefficient", joint)
+                                dval = follower_bus.read("D_Coefficient", joint)
+                                print(f"[PID:{joint}] P={pval} I={ival} D={dval}")
+                            else:
+                                pval = follower_bus.read("P_Coefficient")
+                                ival = follower_bus.read("I_Coefficient")
+                                dval = follower_bus.read("D_Coefficient")
+                                names = list(follower_bus.motors.keys())
+                                for i, nm in enumerate(names):
+                                    pv = pval[i] if i < len(pval) else pval
+                                    iv = ival[i] if i < len(ival) else ival
+                                    dv = dval[i] if i < len(dval) else dval
+                                    print(f"[PID:{nm}] P={pv} I={iv} D={dv}")
+                        elif is_dynamixel:
+                            if joint:
+                                pval = follower_bus.read("Position_P_Gain", joint)
+                                ival = follower_bus.read("Position_I_Gain", joint)
+                                dval = follower_bus.read("Position_D_Gain", joint)
+                                print(f"[PID:{joint}] P={pval} I={ival} D={dval}")
+                            else:
+                                pval = follower_bus.read("Position_P_Gain")
+                                ival = follower_bus.read("Position_I_Gain")
+                                dval = follower_bus.read("Position_D_Gain")
+                                names = list(follower_bus.motors.keys())
+                                for i, nm in enumerate(names):
+                                    pv = pval[i] if i < len(pval) else pval
+                                    iv = ival[i] if i < len(ival) else ival
+                                    dv = dval[i] if i < len(dval) else dval
+                                    print(f"[PID:{nm}] P={pv} I={iv} D={dv}")
+                        else:
+                            print(f"⚠️ 未识别的总线类型：{bus_mod}")
+                    except Exception as e:
+                        print(f"❌ 读取 PID 失败: {e}")
+                    continue
+                elif len(parts) >= 2 and parts[1] == "set":
+                    if len(parts) < 6:
+                        print("用法: pid set (all|JOINT_NAME) P I D")
+                        continue
+                    target = parts[2]
+                    try:
+                        p_new = int(float(parts[3]))
+                        i_new = int(float(parts[4]))
+                        d_new = int(float(parts[5]))
+                    except ValueError:
+                        print("❌ P/I/D 必须是数字")
+                        continue
+                    try:
+                        # 安全：写前尽量关力矩
+                        try:
+                            follower_bus.write("Torque_Enable", 0)
+                        except Exception:
+                            pass
+                        if is_feetech:
+                            if target.lower() == "all":
+                                follower_bus.write("P_Coefficient", p_new)
+                                follower_bus.write("I_Coefficient", i_new)
+                                follower_bus.write("D_Coefficient", d_new)
+                            else:
+                                follower_bus.write("P_Coefficient", p_new, target)
+                                follower_bus.write("I_Coefficient", i_new, target)
+                                follower_bus.write("D_Coefficient", d_new, target)
+                        elif is_dynamixel:
+                            if target.lower() == "all":
+                                follower_bus.write("Position_P_Gain", p_new)
+                                follower_bus.write("Position_I_Gain", i_new)
+                                follower_bus.write("Position_D_Gain", d_new)
+                            else:
+                                follower_bus.write("Position_P_Gain", p_new, target)
+                                follower_bus.write("Position_I_Gain", i_new, target)
+                                follower_bus.write("Position_D_Gain", d_new, target)
+                        else:
+                            print(f"⚠️ 未识别的总线类型：{bus_mod}")
+                        # 写后开力矩
+                        try:
+                            follower_bus.write("Torque_Enable", 1)
+                        except Exception:
+                            pass
+                        print(f"✅ PID 已写入 ({target}): P={p_new} I={i_new} D={d_new}")
+                    except Exception as e:
+                        print(f"❌ 写入 PID 失败: {e}")
+                    continue
+                else:
+                    print("用法: pid get [JOINT] | pid set (all|JOINT) P I D")
+                    continue
 
             # 速度调试：开启/停止
             if low.startswith("veldebug"):

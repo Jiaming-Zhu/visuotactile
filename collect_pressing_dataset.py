@@ -940,6 +940,12 @@ def main(argv: List[str] | None = None) -> int:
     follower_name = next(iter(robot.follower_arms.keys()))
     follower = robot.follower_arms[follower_name]
 
+    # 设置位置环 PID 的 I 系数为 2（Feetech: I_Coefficient，写入所有从动臂关节）
+    try:
+        follower.write("I_Coefficient", 2)
+    except Exception as e:
+        print(f"⚠️ 设置 I_Coefficient 失败：{e}")
+
     # 启动 10Hz 遥测与实时波形（四个信号：load/current/position/speed）
     TELEMETRY_PORT = 8766
     telemetry_stop = threading.Event()
