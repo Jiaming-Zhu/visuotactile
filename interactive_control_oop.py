@@ -228,16 +228,29 @@ class RealRobotInterface:
         if not self.robot:
             return
         if disable_torque:
-            for name in self.robot.follower_arms:
-                try:
-                    with self._io_lock:
-                        self.robot.follower_arms[name].write("Torque_Enable", 0)
-                except Exception:
-                    pass
+            try:
+                self.set_torque_enable(False)
+            except Exception:
+                pass
         with self._io_lock:
             self.robot.disconnect()
             self.robot = None
         self._follower_name = None
+
+    def set_torque_enable(self, enabled: bool) -> None:
+        """统一开启/关闭所有 follower 关节的力矩。"""
+        if not self.robot:
+            raise RuntimeError("Physical arm is not connected.")
+        value = 1 if enabled else 0
+        errors = []
+        for name, bus in self.robot.follower_arms.items():
+            try:
+                with self._io_lock:
+                    bus.write("Torque_Enable", value)
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+        if errors:
+            raise RuntimeError("Torque command failed: " + "; ".join(errors))
 
     def write_goal_positions(self, joint_angles_deg: Sequence[float]) -> None:
         """写入目标角（度）。长度根据电机数量自动补齐/截断，并加零点偏移。"""
@@ -528,23 +541,51 @@ def _format_vec(v: Sequence[float]) -> str:
     return f"[{v[0]:.3f}, {v[1]:.3f}, {v[2]:.3f}]"
 
 def help_message() -> None:
-    print("支持命令: \n"
-          "  connect                连接真实机械臂\n"
-          "  disconnect             断开真实机械臂\n"
-          "  current                显示当前末端位置（若连接则基于真实角度）\n"
-          "  home                   关节归零（前 N 个控制关节）\n"
-          "  save                   保存当前位置\n"
-          "  list                   列出已保存位置\n"
-          "  goto N                 移动到第 N 个保存位置\n"
-          "  load                   移动到最后一次保存的位置\n"
-          "  move x y z             移动到目标位置（单位 m）\n"
-          "  x y z                  直接输入三数等同于 move\n"
-          "  metrics start [interval] [window]  启动实时波形GUI (默认 0.1s / 20s)\n"
-          "  metrics stop                      关闭实时波形GUI\n"
-          "  veldebug start [interval]        开启速度调试输出（符号位/幅值/解码）\n"
-          "  veldebug stop                    停止速度调试输出\n"
-          "  help                   显示帮助\n"
-          "  quit/exit              退出\n")
+    print("=" * 80)
+    print("机械臂交互式控制 - 命令列表")
+    print("=" * 80)
+    print("\n【连接管理】")
+    print("  connect                连接真实机械臂（follower 臂）")
+    print("  disconnect             断开真实机械臂")
+    print("\n【力矩控制】")
+    print("  torque on/off          开启或关闭所有 follower 关节的力矩")
+    print("\n【位置控制】")
+    print("  current                显示当前末端位置（若连接则基于真实角度）")
+    print("  home                   关节归零（前 N 个控制关节）")
+    print("  move x y z             移动到目标位置（单位：米）")
+    print("  x y z                  直接输入三数等同于 move x y z")
+    print("\n【位置保存与回放】")
+    print("  save                   保存当前位置到内存")
+    print("  list                   列出所有已保存的位置")
+    print("  goto N                 移动到第 N 个保存位置（N 从 1 开始）")
+    print("  load                   移动到最后一次保存的位置")
+    print("  log_posi               记录当前末端位置和所有关节角度到日志文件（JSON 格式）")
+    print("  log_mode               进入日志模式：关闭力矩，按 Enter 追加记录，输入 exit 退出")
+    print("\n【关节控制】")
+    print("  gripper [angle]        设置夹爪角度（度）。不传参数则显示当前角度")
+    print("                         示例: gripper 50  (打开到 50 度)")
+    print("                              gripper 0    (闭合)")
+    print("  wrist_roll [angle]     设置腕部旋转角度（度）。不传参数则显示当前角度")
+    print("                         示例: wrist_roll 45  (旋转到 45 度)")
+    print("                              wrist_roll 0    (归零)")
+    print("\n【PID 调参】")
+    print("  pid get [joint]        读取 PID 参数（不指定关节则显示所有关节）")
+    print("                         示例: pid get")
+    print("                              pid get elbow_flex")
+    print("  pid set (all|joint) P I D  设置 PID 参数")
+    print("                         示例: pid set all 24 0 32")
+    print("                              pid set elbow_flex 24 0 32")
+    print("\n【监控与调试】")
+    print("  metrics start [interval] [window]  启动实时波形GUI")
+    print("                         默认: interval=0.1s, window=20s")
+    print("  metrics stop                      关闭实时波形GUI")
+    print("  veldebug start [interval]        开启速度调试输出（符号位/幅值/解码）")
+    print("                         默认: interval=0.2s")
+    print("  veldebug stop                    停止速度调试输出")
+    print("\n【其他】")
+    print("  help                   显示此帮助信息")
+    print("  quit / exit            退出程序")
+    print("=" * 80)
 
 
 def run_cli() -> None:
@@ -711,6 +752,69 @@ def run_cli() -> None:
             if veldebug_stop.wait(veldebug_interval):
                 break
 
+    def capture_log_snapshot():
+        """采集一次末端与关节角度的快照，供日志使用。"""
+        if controller.real and controller.real.is_connected:
+            joint_deg = controller.real.read_joint_positions()
+            controller.sim.reset_joint_states(np.deg2rad(joint_deg))
+            joint_angles_deg = joint_deg.tolist()
+            try:
+                follower = next(iter(controller.real.robot.follower_arms.values()))  # type: ignore
+                joint_names = list(follower.motor_names)
+            except Exception:
+                joint_names = [f"joint_{i}" for i in range(len(joint_angles_deg))]
+            source = "real"
+        else:
+            sim_angles = controller.get_sim_joint_angles_deg()
+            joint_angles_deg = list(sim_angles)
+            try:
+                joint_names = [
+                    p.getJointInfo(controller.sim.robot_id, j)[1].decode("utf-8")
+                    for j in controller.sim.control_joint_indices[: len(joint_angles_deg)]
+                ]
+            except Exception:
+                joint_names = [f"joint_{i}" for i in range(len(joint_angles_deg))]
+            source = "simulation"
+
+        pos = controller.sim.get_end_effector_position()
+        log_data = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "unix_timestamp": time.time(),
+            "source": source,
+            "end_effector_position": {
+                "x": float(pos[0]),
+                "y": float(pos[1]),
+                "z": float(pos[2]),
+                "unit": "meter",
+            },
+            "joint_angles": {name: float(angle) for name, angle in zip(joint_names, joint_angles_deg)},
+            "joint_angles_unit": "degree",
+        }
+        return log_data, pos, joint_angles_deg
+
+    def append_log_entry(log_data):
+        """将快照写入公共日志文件，返回写入信息。"""
+        log_dir = Path(__file__).parent / "outputs" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "position_logs.json"
+
+        entries: List[dict] = []
+        corrupted_backup: Optional[str] = None
+        if log_file.exists():
+            try:
+                current = json.loads(log_file.read_text(encoding="utf-8"))
+                if isinstance(current, list):
+                    entries = current
+                elif isinstance(current, dict):
+                    entries = [current]
+            except json.JSONDecodeError:
+                backup_file = log_file.with_suffix(".corrupted.json")
+                log_file.replace(backup_file)
+                corrupted_backup = backup_file.name
+        entries.append(log_data)
+        log_file.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        return log_file, len(entries), corrupted_backup
+
     print("=" * 80)
     print("机械臂交互式控制 (OOP 版本)")
     print("=" * 80)
@@ -724,7 +828,53 @@ def run_cli() -> None:
             low = cmd.lower()
 
             if low in ("quit", "exit"):
-                print("退出程序...")
+                # 如果连接了真实机械臂，退出前自动移动到安全位置
+                if controller.real and controller.real.is_connected:
+                    print("退出程序前，正在将机械臂移动到安全位置...")
+                    try:
+                        # 1. 移动到末端位置 (0.1, 0, 0.2)
+                        print("  移动到末端位置 [0.1, 0.0, 0.2]...")
+                        result = controller.move_to([0.1, 0.0, 0.2], wait_timeout=5.0, tolerance=0.02)
+                        if result.reached:
+                            print("  ✓ 末端位置已到达")
+                        else:
+                            print(f"  ⚠️ 末端位置未完全到达，误差 {result.error*1000:.1f} mm")
+                        
+                        # 2. 设置 wrist_roll 为 0
+                        print("  设置 wrist_roll 为 0°...")
+                        if controller.real and controller.real.is_connected:
+                            joint_deg = controller.real.read_joint_positions().tolist()
+                            if len(joint_deg) > 4:
+                                joint_deg[4] = 0.0
+                                result_wr = controller.set_joint_angles_deg(joint_deg)
+                                if result_wr.reached:
+                                    print("  ✓ wrist_roll 已设置")
+                                else:
+                                    print(f"  ⚠️ wrist_roll 未完全到达，误差 {result_wr.error*1000:.1f} mm")
+                            else:
+                                print("  ⚠️ 无法设置 wrist_roll（关节数量不足）")
+                        
+                        # 3. 设置 gripper 为 0
+                        print("  设置 gripper 为 0°...")
+                        if controller.real and controller.real.is_connected:
+                            joint_deg = controller.real.read_joint_positions().tolist()
+                            gripper_idx = len(joint_deg) - 1
+                            if gripper_idx >= 0:
+                                joint_deg[gripper_idx] = 0.0
+                                result_gr = controller.set_joint_angles_deg(joint_deg)
+                                if result_gr.reached:
+                                    print("  ✓ gripper 已设置")
+                                else:
+                                    print(f"  ⚠️ gripper 未完全到达，误差 {result_gr.error*1000:.1f} mm")
+                            else:
+                                print("  ⚠️ 无法设置 gripper（关节数量不足）")
+                        
+                        print("安全位置设置完成")
+                    except Exception as e:
+                        print(f"  ⚠️ 设置安全位置时出错: {e}")
+                        print("  继续退出...")
+                else:
+                    print("退出程序...")
                 break
 
             if low == "help":
@@ -806,6 +956,23 @@ def run_cli() -> None:
                     print("✅ 真实机械臂已断开")
                 except Exception as e:
                     print(f"❌ 断开失败: {e}")
+                continue
+
+            if low.startswith("torque"):
+                parts = cmd.split()
+                if len(parts) != 2 or parts[1].lower() not in {"on", "off", "enable", "disable"}:
+                    print("用法: torque (on|off)")
+                    continue
+                if not (controller.real and controller.real.is_connected):
+                    print("⚠️ 请先 connect 真实机械臂后再设置力矩")
+                    continue
+                enable = parts[1].lower() in {"on", "enable"}
+                try:
+                    controller.real.set_torque_enable(enable)
+                    action = "开启" if enable else "关闭"
+                    print(f"✅ 已{action}所有 follower 关节力矩")
+                except Exception as e:
+                    print(f"❌ 设置力矩失败: {e}")
                 continue
 
             if low.startswith("metrics"):
@@ -1005,6 +1172,121 @@ def run_cli() -> None:
                     print("用法: veldebug start [interval] | veldebug stop")
                 continue
 
+            # 夹爪控制：gripper [angle]
+            if low.startswith("gripper"):
+                parts = cmd.split()
+                if len(parts) == 1:
+                    # 仅显示当前夹爪角度
+                    try:
+                        if controller.real and controller.real.is_connected:
+                            joint_deg = controller.real.read_joint_positions()
+                            gripper_idx = len(joint_deg) - 1
+                            if gripper_idx >= 0:
+                                print(f"当前夹爪角度: {joint_deg[gripper_idx]:.2f}°")
+                            else:
+                                print("⚠️ 无法读取夹爪角度（关节数量不足）")
+                        else:
+                            # 仿真模式：从仿真读取
+                            sim_angles = controller.get_sim_joint_angles_deg()
+                            if len(sim_angles) >= 6:
+                                print(f"当前夹爪角度（仿真）: {sim_angles[5]:.2f}°")
+                            else:
+                                print("⚠️ 无法读取夹爪角度（关节数量不足）")
+                    except Exception as e:
+                        print(f"❌ 读取夹爪角度失败: {e}")
+                elif len(parts) == 2:
+                    # 设置夹爪角度
+                    try:
+                        target_angle = float(parts[1])
+                        if controller.real and controller.real.is_connected:
+                            # 真实机械臂：读取当前所有关节，只修改最后一个
+                            joint_deg = controller.real.read_joint_positions().tolist()
+                            gripper_idx = len(joint_deg) - 1
+                            if gripper_idx >= 0:
+                                joint_deg[gripper_idx] = target_angle
+                                result = controller.set_joint_angles_deg(joint_deg)
+                                status = "到达" if result.reached else "未到达"
+                                print(f"夹爪设置: {status}，目标 {target_angle:.2f}°，误差 {result.error*1000:.1f} mm")
+                            else:
+                                print("⚠️ 无法设置夹爪（关节数量不足）")
+                        else:
+                            # 仿真模式：读取仿真关节，只修改最后一个
+                            sim_angles = controller.get_sim_joint_angles_deg()
+                            if len(sim_angles) >= 6:
+                                sim_angles[5] = target_angle
+                                result = controller.set_joint_angles_deg(sim_angles)
+                                status = "到达" if result.reached else "未到达"
+                                print(f"夹爪设置（仿真）: {status}，目标 {target_angle:.2f}°，误差 {result.error*1000:.1f} mm")
+                            else:
+                                print("⚠️ 无法设置夹爪（关节数量不足）")
+                    except ValueError:
+                        print("❌ 角度必须是数字")
+                    except Exception as e:
+                        print(f"❌ 设置夹爪失败: {e}")
+                else:
+                    print("用法: gripper [angle]")
+                    print("      不传参数：显示当前夹爪角度")
+                    print("      传角度值：设置夹爪角度（度）")
+                continue
+
+            # 腕部旋转控制：wrist_roll [angle]
+            if low.startswith("wrist_roll"):
+                parts = cmd.split()
+                if len(parts) == 1:
+                    # 仅显示当前 wrist_roll 角度
+                    try:
+                        if controller.real and controller.real.is_connected:
+                            joint_deg = controller.real.read_joint_positions()
+                            # wrist_roll 是第 5 个关节（索引 4）
+                            wrist_roll_idx = 4
+                            if len(joint_deg) > wrist_roll_idx:
+                                print(f"当前腕部旋转角度: {joint_deg[wrist_roll_idx]:.2f}°")
+                            else:
+                                print("⚠️ 无法读取腕部旋转角度（关节数量不足）")
+                        else:
+                            # 仿真模式：从仿真读取
+                            sim_angles = controller.get_sim_joint_angles_deg()
+                            if len(sim_angles) > 4:
+                                print(f"当前腕部旋转角度（仿真）: {sim_angles[4]:.2f}°")
+                            else:
+                                print("⚠️ 无法读取腕部旋转角度（关节数量不足）")
+                    except Exception as e:
+                        print(f"❌ 读取腕部旋转角度失败: {e}")
+                elif len(parts) == 2:
+                    # 设置 wrist_roll 角度
+                    try:
+                        target_angle = float(parts[1])
+                        if controller.real and controller.real.is_connected:
+                            # 真实机械臂：读取当前所有关节，只修改第 5 个（索引 4）
+                            joint_deg = controller.real.read_joint_positions().tolist()
+                            wrist_roll_idx = 4
+                            if len(joint_deg) > wrist_roll_idx:
+                                joint_deg[wrist_roll_idx] = target_angle
+                                result = controller.set_joint_angles_deg(joint_deg)
+                                status = "到达" if result.reached else "未到达"
+                                print(f"腕部旋转设置: {status}，目标 {target_angle:.2f}°，误差 {result.error*1000:.1f} mm")
+                            else:
+                                print("⚠️ 无法设置腕部旋转（关节数量不足）")
+                        else:
+                            # 仿真模式：读取仿真关节，只修改第 5 个（索引 4）
+                            sim_angles = controller.get_sim_joint_angles_deg()
+                            if len(sim_angles) > 4:
+                                sim_angles[4] = target_angle
+                                result = controller.set_joint_angles_deg(sim_angles)
+                                status = "到达" if result.reached else "未到达"
+                                print(f"腕部旋转设置（仿真）: {status}，目标 {target_angle:.2f}°，误差 {result.error*1000:.1f} mm")
+                            else:
+                                print("⚠️ 无法设置腕部旋转（关节数量不足）")
+                    except ValueError:
+                        print("❌ 角度必须是数字")
+                    except Exception as e:
+                        print(f"❌ 设置腕部旋转失败: {e}")
+                else:
+                    print("用法: wrist_roll [angle]")
+                    print("      不传参数：显示当前腕部旋转角度")
+                    print("      传角度值：设置腕部旋转角度（度）")
+                continue
+
             if low == "current":
                 try:
                     if controller.real and controller.real.is_connected:
@@ -1064,6 +1346,64 @@ def run_cli() -> None:
                     result = controller.move_to_with_live_comparison(target)
                     status = "到达" if result.reached else "未到达"
                     print(f"Move: {status}，误差 {result.error*1000:.1f} mm")
+                continue
+
+            if low == "log_mode":
+                torque_was_disabled = False
+                if controller.real and controller.real.is_connected:
+                    try:
+                        controller.real.set_torque_enable(False)
+                        torque_was_disabled = True
+                        print("ℹ️ 已关闭所有 follower 力矩，机械臂处于松弛状态")
+                    except Exception as e:
+                        print(f"⚠️ 关闭力矩失败：{e}")
+                else:
+                    print("ℹ️ 未连接真实机械臂，将以仿真角度记录")
+                print("进入日志模式，按 Enter 记录一次当前位置，输入 exit 退出。")
+                try:
+                    while True:
+                        try:
+                            log_cmd = input("[log] ").strip()
+                        except KeyboardInterrupt:
+                            print("\n⚠️ 日志模式被中断，正在退出...")
+                            break
+                        low_log = log_cmd.lower()
+                        if low_log in {"exit", "quit"}:
+                            break
+                        if log_cmd == "":
+                            try:
+                                log_data, pos, joint_angles_deg = capture_log_snapshot()
+                                log_file, count, backup_name = append_log_entry(log_data)
+                                if backup_name:
+                                    print(f"⚠️ 原日志解析失败，已备份至 {backup_name}")
+                                print(f"✅ [log] 已记录到 {log_file} | 条目数 {count}")
+                                print(f"   末端: {_format_vec(pos)} | 关节数: {len(joint_angles_deg)}")
+                            except Exception as e:
+                                print(f"❌ [log] 记录失败: {e}")
+                        else:
+                            print("ℹ️ 仅支持按 Enter 记录或输入 exit 退出")
+                finally:
+                    if torque_was_disabled and controller.real and controller.real.is_connected:
+                        try:
+                            controller.real.set_torque_enable(True)
+                            print("ℹ️ 已重新开启所有 follower 力矩")
+                        except Exception as e:
+                            print(f"⚠️ 无法重新开启力矩：{e}")
+                print("日志模式结束")
+                continue
+
+            if low == "log_posi":
+                try:
+                    log_data, pos, joint_angles_deg = capture_log_snapshot()
+                    log_file, count, backup_name = append_log_entry(log_data)
+                    if backup_name:
+                        print(f"⚠️ 原日志解析失败，已备份至 {backup_name}")
+                    print(f"✅ 已追加位置信息到: {log_file}")
+                    print(f"   当前日志条目数: {count}")
+                    print(f"   末端位置: {_format_vec(pos)}")
+                    print(f"   关节数量: {len(joint_angles_deg)}")
+                except Exception as e:
+                    print(f"❌ 记录位置失败: {e}")
                 continue
 
             def try_parse_xyz(text: str) -> Optional[Tuple[float, float, float]]:
