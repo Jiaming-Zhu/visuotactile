@@ -1,0 +1,92 @@
+{
+  "properties": {
+    "WoodBlock_Native": {
+      "mass": "medium",
+      "stiffness": "rigid",
+      "material": "wood"
+    },
+    "WoodBlock_Foil": {
+      "mass": "medium",
+      "stiffness": "rigid",
+      "material": "wood"
+    },
+    "WoodBlock_Red": {
+      "mass": "medium",
+      "stiffness": "rigid",
+      "material": "wood"
+    },
+    "YogaBrick_Native": {
+      "mass": "low",
+      "stiffness": "medium",
+      "material": "foam"
+    },
+    "YogaBrick_Blue": {
+      "mass": "low",
+      "stiffness": "medium",
+      "material": "foam"
+    },
+    "CardboardBox_Hollow": {
+      "mass": "very_low",
+      "stiffness": "soft",
+      "material": "hollow_container"
+    },
+    "CardboardBox_SpongeFilled": {
+      "mass": "very_low",
+      "stiffness": "soft",
+      "material": "filled_container"
+    },
+    "CardboardBox_RockFilled": {
+      "mass": "high",
+      "stiffness": "rigid",
+      "material": "filled_container"
+    },
+    "CardboardBox_RockFilled_Red": {
+      "mass": "high",
+      "stiffness": "rigid",
+      "material": "filled_container"
+    },
+    "Sponge_Blue": {
+      "mass": "very_low",
+      "stiffness": "very_soft",
+      "material": "sponge"
+    }
+  },
+  "mass_to_idx": {
+    "very_low": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3
+  },
+  "stiffness_to_idx": {
+    "very_soft": 0,
+    "soft": 1,
+    "medium": 2,
+    "rigid": 3
+  },
+  "material_to_idx": {
+    "sponge": 0,
+    "foam": 1,
+    "wood": 2,
+    "hollow_container": 3,
+    "filled_container": 4
+  },
+  "idx_to_mass": {
+    "0": "very_low",
+    "1": "low",
+    "2": "medium",
+    "3": "high"
+  },
+  "idx_to_stiffness": {
+    "0": "very_soft",
+    "1": "soft",
+    "2": "medium",
+    "3": "rigid"
+  },
+  "idx_to_material": {
+    "0": "sponge",
+    "1": "foam",
+    "2": "wood",
+    "3": "hollow_container",
+    "4": "filled_container"
+  }
+}

@@ -623,6 +623,224 @@ def _prompt_target_count() -> Optional[int]:
         return None
 
 
+def _scan_available_cameras(max_index: int = 10) -> List[Dict[str, any]]:
+    """
+    扫描系统中可用的摄像头。
+
+    返回一个列表，每个元素包含摄像头索引和基本信息。
+    """
+    available = []
+    print(f"\n🔍 正在扫描可用摄像头 (索引 0-{max_index - 1})...")
+
+    for idx in range(max_index):
+        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            # 获取摄像头信息
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            # 尝试获取设备名称（Linux 特有）
+            backend = cap.getBackendName()
+            cap.release()
+            available.append({
+                "index": idx,
+                "width": width,
+                "height": height,
+                "fps": fps,
+                "backend": backend,
+            })
+
+    return available
+
+
+def _select_camera_interactive(
+    available_cameras: List[Dict[str, any]],
+    default_index: int,
+) -> Optional[int]:
+    """
+    让用户从可用摄像头列表中选择一个。
+
+    返回选中的摄像头索引，如果用户取消则返回 None。
+    """
+    if not available_cameras:
+        print("❌ 没有检测到可用的摄像头！")
+        return None
+
+    print("\n" + "=" * 60)
+    print("  📷 检测到以下可用摄像头:")
+    print("=" * 60)
+
+    # 找到默认索引在列表中的位置
+    default_in_list = None
+    for i, cam in enumerate(available_cameras):
+        marker = ""
+        if cam["index"] == default_index:
+            marker = " [默认]"
+            default_in_list = i
+        fps_str = f"{cam['fps']:.1f}" if cam["fps"] > 0 else "N/A"
+        print(f"  [{i + 1}] 索引 {cam['index']}: {cam['width']}x{cam['height']} @ {fps_str} FPS ({cam['backend']}){marker}")
+
+    print("=" * 60)
+
+    while True:
+        prompt = f"请选择摄像头编号 (1-{len(available_cameras)})"
+        if default_in_list is not None:
+            prompt += f", 直接回车使用默认 [{default_index}]"
+        prompt += ", 或输入 'q' 退出: "
+
+        user_input = input(prompt).strip().lower()
+
+        if user_input == "q":
+            return None
+
+        if user_input == "":
+            if default_in_list is not None:
+                return available_cameras[default_in_list]["index"]
+            else:
+                # 默认索引不在可用列表中，使用第一个
+                print(f"⚠️ 默认索引 {default_index} 不可用，将使用第一个可用摄像头。")
+                return available_cameras[0]["index"]
+
+        try:
+            choice = int(user_input)
+            if 1 <= choice <= len(available_cameras):
+                return available_cameras[choice - 1]["index"]
+            else:
+                print(f"⚠️ 请输入 1 到 {len(available_cameras)} 之间的数字。")
+        except ValueError:
+            print("⚠️ 无效输入，请输入数字编号。")
+
+
+def _preview_camera_and_confirm(
+    camera_index: int,
+    width: int,
+    height: int,
+    warmup_frames: int = 10,
+) -> bool:
+    """
+    打开摄像头拍摄预览图片，让用户确认是否为目标摄像头。
+
+    尝试使用 GUI 窗口显示，如果 OpenCV 没有 GUI 支持则保存图片让用户查看。
+    返回 True 表示用户确认，False 表示用户拒绝。
+    """
+    print(f"\n📷 正在打开摄像头 {camera_index} 进行预览...")
+    cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
+        cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        print(f"❌ 无法打开摄像头 {camera_index}，请检查连接或尝试其他索引。")
+        return False
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+    # 预热
+    for _ in range(warmup_frames):
+        cap.read()
+
+    # 拍摄一帧用于预览
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret or frame is None:
+        print("⚠️ 摄像头读取失败，请检查连接。")
+        return False
+
+    # 在画面上叠加提示文字
+    overlay = frame.copy()
+    text_lines = [
+        f"Camera Index: {camera_index}",
+        f"Resolution: {frame.shape[1]}x{frame.shape[0]}",
+    ]
+    y_offset = 30
+    for line in text_lines:
+        cv2.putText(
+            overlay,
+            line,
+            (10, y_offset),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+        y_offset += 30
+
+    # 尝试使用 GUI 窗口显示
+    gui_available = True
+    try:
+        window_name = f"Camera {camera_index} Preview"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, width, height)
+    except cv2.error:
+        gui_available = False
+
+    if gui_available:
+        # GUI 模式：显示窗口
+        print("=" * 60)
+        print(f"  摄像头预览窗口已打开 (索引: {camera_index})")
+        print("  请确认这是否是你要使用的摄像头。")
+        print("  确认: 按 Enter / Y / 空格")
+        print("  拒绝: 按 Q / N / Esc")
+        print("=" * 60)
+
+        confirmed = False
+        try:
+            while True:
+                cv2.imshow(window_name, overlay)
+                key = cv2.waitKey(100) & 0xFF
+                if key in (13, ord("y"), ord("Y"), 32):
+                    confirmed = True
+                    print("✅ 用户确认使用该摄像头。")
+                    break
+                if key in (ord("q"), ord("Q"), ord("n"), ord("N"), 27):
+                    confirmed = False
+                    print("❌ 用户拒绝使用该摄像头。")
+                    break
+        except KeyboardInterrupt:
+            print("\n用户中断预览。")
+            confirmed = False
+        finally:
+            cv2.destroyAllWindows()
+            for _ in range(5):
+                cv2.waitKey(1)
+        return confirmed
+    else:
+        # 无 GUI 模式：保存图片让用户查看
+        preview_path = Path("camera_preview.jpg")
+        cv2.imwrite(str(preview_path), overlay)
+        print("=" * 60)
+        print(f"  ⚠️ OpenCV 没有 GUI 支持，已保存预览图片。")
+        print(f"  📁 预览图片路径: {preview_path.absolute()}")
+        print(f"  📷 摄像头索引: {camera_index}")
+        print(f"  📐 分辨率: {frame.shape[1]}x{frame.shape[0]}")
+        print("=" * 60)
+        print("  请打开图片查看，然后在此确认。")
+
+        while True:
+            user_input = input("  这是正确的摄像头吗？(y/n): ").strip().lower()
+            if user_input in ("y", "yes", ""):
+                print("✅ 用户确认使用该摄像头。")
+                # 删除预览图片
+                try:
+                    preview_path.unlink()
+                except Exception:
+                    pass
+                return True
+            if user_input in ("n", "no", "q"):
+                print("❌ 用户拒绝使用该摄像头。")
+                try:
+                    preview_path.unlink()
+                except Exception:
+                    pass
+                return False
+            print("  请输入 y 或 n")
+
+
 def _disable_all_torque(robot: ManipulatorRobot) -> None:
     try:
         for name, arm in robot.follower_arms.items():
@@ -638,6 +856,28 @@ def _disable_all_torque(robot: ManipulatorRobot) -> None:
 def main() -> int:
     args = parse_args()
     _configure_logging(args.log_level)
+
+    # 扫描可用摄像头并让用户选择
+    available_cameras = _scan_available_cameras(max_index=10)
+    selected_camera_index = _select_camera_interactive(
+        available_cameras=available_cameras,
+        default_index=args.camera_index,
+    )
+    if selected_camera_index is None:
+        raise SystemExit("未选择摄像头，退出。")
+
+    # 预览选中的摄像头，让用户确认
+    if not _preview_camera_and_confirm(
+        camera_index=selected_camera_index,
+        width=args.camera_width,
+        height=args.camera_height,
+        warmup_frames=args.camera_warmup,
+    ):
+        raise SystemExit("用户未确认摄像头，退出。")
+
+    # 更新 args 中的摄像头索引（供后续使用）
+    args.camera_index = selected_camera_index
+
     target_count = _prompt_target_count()
     if not args.log_file.exists():
         raise SystemExit(f"日志文件不存在：{args.log_file}")
