@@ -15,6 +15,7 @@ from typing import List, Tuple, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.onnx
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms, models
 from PIL import Image
@@ -539,7 +540,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
 
 def train_multitask_model(model, train_loader, val_loader, criterion, optimizer, 
-                          num_epochs=10, device='cpu', save_path=None, output_dir=None):
+                          num_epochs=10, device='cpu', save_path=None, output_dir=None, class_names=None):
     """多任务训练循环"""
     best_acc = 0.0
     
@@ -712,6 +713,10 @@ def train_multitask_model(model, train_loader, val_loader, criterion, optimizer,
                         logger.info(classification_report(all_labels['material'], all_preds['material'],
                                                           target_names=material_names, digits=4, zero_division=0))
                         
+                        # 绘制混淆矩阵
+                        if output_dir and class_names:
+                            plot_confusion_matrices(all_preds, all_labels, class_names, output_dir)
+                        
                     except ImportError:
                         logger.warning("scikit-learn not installed, skipping detailed reports.")
 
@@ -721,6 +726,188 @@ def train_multitask_model(model, train_loader, val_loader, criterion, optimizer,
     plotter.close()
     
     return model
+
+
+def plot_confusion_matrices(all_preds, all_labels, class_names, output_dir: Path):
+    """
+    绘制多任务混淆矩阵热力图
+    
+    Args:
+        all_preds: 预测结果字典
+        all_labels: 真实标签字典
+        class_names: 类别名称列表
+        output_dir: 输出目录
+    """
+    try:
+        from sklearn.metrics import confusion_matrix
+        import seaborn as sns
+    except ImportError:
+        logger.warning("sklearn or seaborn not installed, skipping confusion matrix plot.")
+        return
+    
+    # 准备各任务的标签名
+    task_configs = {
+        'class': {
+            'labels': class_names,
+            'title': 'Class Confusion Matrix',
+            'figsize': (14, 12),
+            'fontsize': 8,
+        },
+        'mass': {
+            'labels': list(MASS_TO_IDX.keys()),
+            'title': 'Mass Confusion Matrix',
+            'figsize': (8, 6),
+            'fontsize': 12,
+        },
+        'stiffness': {
+            'labels': list(STIFFNESS_TO_IDX.keys()),
+            'title': 'Stiffness Confusion Matrix',
+            'figsize': (8, 6),
+            'fontsize': 12,
+        },
+        'material': {
+            'labels': list(MATERIAL_TO_IDX.keys()),
+            'title': 'Material Confusion Matrix',
+            'figsize': (10, 8),
+            'fontsize': 10,
+        },
+    }
+    
+    # 创建 2x2 子图布局
+    fig, axes = plt.subplots(2, 2, figsize=(20, 18))
+    fig.suptitle('Visual ResNet18 - Confusion Matrices', fontsize=16, fontweight='bold')
+    
+    task_list = ['class', 'mass', 'stiffness', 'material']
+    
+    for idx, task in enumerate(task_list):
+        ax = axes[idx // 2, idx % 2]
+        config = task_configs[task]
+        
+        # 计算混淆矩阵
+        cm = confusion_matrix(all_labels[task], all_preds[task])
+        
+        # 计算归一化混淆矩阵（按行归一化，即按真实标签归一化）
+        cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-8)
+        
+        # 绘制热力图
+        sns.heatmap(
+            cm_normalized,
+            annot=True,
+            fmt='.2f',
+            cmap='Blues',
+            xticklabels=config['labels'],
+            yticklabels=config['labels'],
+            ax=ax,
+            cbar=True,
+            square=True,
+            annot_kws={'fontsize': config['fontsize']},
+        )
+        
+        ax.set_title(config['title'], fontsize=14, fontweight='bold')
+        ax.set_xlabel('Predicted', fontsize=12)
+        ax.set_ylabel('True', fontsize=12)
+        
+        # 旋转标签以便阅读
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=config['fontsize'])
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=config['fontsize'])
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    
+    # 保存图片
+    save_path = output_dir / 'visual_confusion_matrices.png'
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    logger.info(f"📊 Saved confusion matrices to {save_path}")
+    
+    plt.close(fig)
+    
+    # 同时生成单独的 Class 混淆矩阵（因为类别较多，单独保存一个大图）
+    fig_class, ax_class = plt.subplots(figsize=(16, 14))
+    
+    cm_class = confusion_matrix(all_labels['class'], all_preds['class'])
+    cm_class_norm = cm_class.astype('float') / (cm_class.sum(axis=1, keepdims=True) + 1e-8)
+    
+    # 同时显示数量和比例
+    annot_labels = []
+    for i in range(cm_class.shape[0]):
+        row = []
+        for j in range(cm_class.shape[1]):
+            count = cm_class[i, j]
+            pct = cm_class_norm[i, j]
+            row.append(f'{count}\n({pct:.1%})')
+        annot_labels.append(row)
+    annot_labels = np.array(annot_labels)
+    
+    sns.heatmap(
+        cm_class_norm,
+        annot=annot_labels,
+        fmt='',
+        cmap='Blues',
+        xticklabels=class_names,
+        yticklabels=class_names,
+        ax=ax_class,
+        cbar=True,
+        square=True,
+        annot_kws={'fontsize': 9},
+    )
+    
+    ax_class.set_title('Class Confusion Matrix (Visual ResNet18)', fontsize=16, fontweight='bold')
+    ax_class.set_xlabel('Predicted', fontsize=14)
+    ax_class.set_ylabel('True', fontsize=14)
+    ax_class.set_xticklabels(ax_class.get_xticklabels(), rotation=45, ha='right', fontsize=10)
+    ax_class.set_yticklabels(ax_class.get_yticklabels(), rotation=0, fontsize=10)
+    
+    plt.tight_layout()
+    
+    save_path_class = output_dir / 'visual_confusion_matrix_class.png'
+    fig_class.savefig(save_path_class, dpi=150, bbox_inches='tight')
+    logger.info(f"📊 Saved class confusion matrix to {save_path_class}")
+    
+    plt.close(fig_class)
+
+
+def evaluate_multitask(model, dataloader, device):
+    """评估多任务模型"""
+    model.eval()
+    
+    all_preds = {'class': [], 'mass': [], 'stiffness': [], 'material': []}
+    all_labels = {'class': [], 'mass': [], 'stiffness': [], 'material': []}
+    
+    running_corrects = {'class': 0, 'mass': 0, 'stiffness': 0, 'material': 0}
+    total_samples = 0
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating"):
+            inputs, labels_class, labels_mass, labels_stiffness, labels_material = batch
+            inputs = inputs.to(device)
+            
+            outputs = model(inputs)
+            
+            preds_class = outputs['class'].argmax(1)
+            preds_mass = outputs['mass'].argmax(1)
+            preds_stiffness = outputs['stiffness'].argmax(1)
+            preds_material = outputs['material'].argmax(1)
+            
+            batch_size = inputs.size(0)
+            running_corrects['class'] += (preds_class.cpu() == labels_class).sum().item()
+            running_corrects['mass'] += (preds_mass.cpu() == labels_mass).sum().item()
+            running_corrects['stiffness'] += (preds_stiffness.cpu() == labels_stiffness).sum().item()
+            running_corrects['material'] += (preds_material.cpu() == labels_material).sum().item()
+            total_samples += batch_size
+            
+            all_preds['class'].extend(preds_class.cpu().numpy())
+            all_preds['mass'].extend(preds_mass.cpu().numpy())
+            all_preds['stiffness'].extend(preds_stiffness.cpu().numpy())
+            all_preds['material'].extend(preds_material.cpu().numpy())
+            
+            all_labels['class'].extend(labels_class.numpy())
+            all_labels['mass'].extend(labels_mass.numpy())
+            all_labels['stiffness'].extend(labels_stiffness.numpy())
+            all_labels['material'].extend(labels_material.numpy())
+    
+    acc = {k: v / total_samples for k, v in running_corrects.items()}
+    
+    return acc, all_preds, all_labels
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train ResNet18 on Plaintextdataset visual anchors")
@@ -732,6 +919,9 @@ def main():
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for dataloader')
     parser.add_argument('--no-augment', action='store_true', help='Disable data augmentation (for overfitting baseline)')
     parser.add_argument('--multitask', action='store_true', help='Enable multi-task learning (class + mass + stiffness + material)')
+    parser.add_argument('--eval-only', action='store_true', help='Only evaluate the model and generate confusion matrices (no training)')
+    parser.add_argument('--checkpoint', type=str, default=None, help='Path to checkpoint file for eval-only mode')
+    parser.add_argument('--export-onnx', action='store_true', help='Export the best model to ONNX format')
     
     args = parser.parse_args()
 
@@ -821,10 +1011,13 @@ def main():
     val_size = dataset_size - train_size
     train_subset, val_subset = random_split(full_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(42))
 
+    # eval-only 模式也需要返回物理属性
+    need_properties = args.multitask or args.eval_only
+    
     train_dataset = SubsetWrapper(train_subset, transform=data_transforms['train'], 
-                                   return_properties=args.multitask, class_names=full_dataset.classes)
+                                   return_properties=need_properties, class_names=full_dataset.classes)
     val_dataset = SubsetWrapper(val_subset, transform=data_transforms['val'],
-                                 return_properties=args.multitask, class_names=full_dataset.classes)
+                                 return_properties=need_properties, class_names=full_dataset.classes)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
@@ -835,7 +1028,7 @@ def main():
     num_classes = len(full_dataset.classes)
     logger.info(f"Number of classes: {num_classes} -> {full_dataset.classes}")
     
-    if args.multitask:
+    if args.multitask or args.eval_only:
         logger.info("🎯 Setting up Multi-Task ResNet18 model...")
         logger.info(f"  Heads: class({num_classes}) + mass({len(MASS_TO_IDX)}) + stiffness({len(STIFFNESS_TO_IDX)}) + material({len(MATERIAL_TO_IDX)})")
         model_ft = MultiTaskResNet(num_classes=num_classes, pretrained=True)
@@ -846,6 +1039,88 @@ def main():
         model_ft.fc = nn.Linear(num_ftrs, num_classes)
     
     model_ft = model_ft.to(device)
+    
+    # 确定检查点路径
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else save_path
+    
+    # Eval-only 模式：仅加载权重并评估
+    if args.eval_only:
+        logger.info("\n📊 Eval-only mode: Loading checkpoint and generating confusion matrices...")
+        
+        if not checkpoint_path.exists():
+            logger.error(f"❌ Checkpoint not found: {checkpoint_path}")
+            logger.error("Please train a model first or specify --checkpoint path")
+            return
+        
+        # 加载模型权重
+        state_dict = torch.load(checkpoint_path, map_location=device)
+        model_ft.load_state_dict(state_dict)
+        logger.info(f"✅ Loaded checkpoint from {checkpoint_path}")
+        
+        # 评估
+        acc, all_preds, all_labels = evaluate_multitask(model_ft, val_loader, device)
+        
+        logger.info("\n" + "=" * 60)
+        logger.info("Evaluation Results:")
+        logger.info(f"  Class Accuracy:     {acc['class']:.4f}")
+        logger.info(f"  Mass Accuracy:      {acc['mass']:.4f}")
+        logger.info(f"  Stiffness Accuracy: {acc['stiffness']:.4f}")
+        logger.info(f"  Material Accuracy:  {acc['material']:.4f}")
+        logger.info("=" * 60)
+        
+        # 打印分类报告
+        try:
+            from sklearn.metrics import classification_report
+            
+            logger.info("\n📊 Classification Report - CLASS:")
+            logger.info(classification_report(all_labels['class'], all_preds['class'],
+                                              target_names=full_dataset.classes, digits=4, zero_division=0))
+            
+            logger.info("\n📊 Classification Report - MASS:")
+            logger.info(classification_report(all_labels['mass'], all_preds['mass'],
+                                              target_names=list(MASS_TO_IDX.keys()), digits=4, zero_division=0))
+            
+            logger.info("\n📊 Classification Report - STIFFNESS:")
+            logger.info(classification_report(all_labels['stiffness'], all_preds['stiffness'],
+                                              target_names=list(STIFFNESS_TO_IDX.keys()), digits=4, zero_division=0))
+            
+            logger.info("\n📊 Classification Report - MATERIAL:")
+            logger.info(classification_report(all_labels['material'], all_preds['material'],
+                                              target_names=list(MATERIAL_TO_IDX.keys()), digits=4, zero_division=0))
+        except ImportError:
+            logger.warning("scikit-learn not installed, skipping classification report.")
+        
+        # 生成混淆矩阵
+        plot_confusion_matrices(all_preds, all_labels, full_dataset.classes, output_dir)
+        
+        # Eval-only 模式下的 ONNX 导出
+        if args.export_onnx:
+            logger.info("Exporting model to ONNX (Eval-only mode)...")
+            onnx_path = output_dir / 'visual_classifier.onnx'
+            
+            dummy_input = torch.randn(1, 3, 224, 224, device=device)
+            
+            if args.multitask:
+                output_names = ['class_logits', 'mass_logits', 'stiffness_logits', 'material_logits']
+            else:
+                output_names = ['class_logits']
+
+            try:
+                 torch.onnx.export(
+                    model_ft, 
+                    dummy_input, 
+                    onnx_path, 
+                    verbose=False,
+                    input_names=['input_image'],
+                    output_names=output_names,
+                    dynamic_axes={'input_image': {0: 'batch_size'}}
+                )
+                 logger.info(f"✅ Model exported to: {onnx_path.resolve()}")
+            except Exception as e:
+                logger.error(f"❌ Failed to export to ONNX: {e}")
+
+        logger.info("\n✅ Evaluation complete!")
+        return
 
     criterion = nn.CrossEntropyLoss()
     optimizer_ft = optim.Adam(model_ft.parameters(), lr=args.learning_rate)
@@ -853,7 +1128,8 @@ def main():
     # Train
     if args.multitask:
         train_multitask_model(model_ft, train_loader, val_loader, criterion, optimizer_ft, 
-                              num_epochs=args.epochs, device=device, save_path=save_path, output_dir=output_dir)
+                              num_epochs=args.epochs, device=device, save_path=save_path, 
+                              output_dir=output_dir, class_names=full_dataset.classes)
     else:
         train_model(model_ft, train_loader, val_loader, criterion, optimizer_ft, 
                     num_epochs=args.epochs, device=device, save_path=save_path, output_dir=output_dir)
@@ -880,6 +1156,39 @@ def main():
     with open(properties_path, 'w') as f:
         json.dump(properties_data, f, indent=2)
     logger.info(f"Saved physical properties to {properties_path}")
+
+    # Export to ONNX
+    if args.export_onnx:
+        logger.info("Exporting model to ONNX...")
+        onnx_path = output_dir / 'visual_classifier.onnx'
+        
+        # Load best weights
+        if save_path.exists():
+            model_ft.load_state_dict(torch.load(save_path, map_location=device))
+        
+        model_ft.eval()
+        dummy_input = torch.randn(1, 3, 224, 224, device=device)
+        
+        if args.multitask:
+            # MultiTaskResNet returns a dict, ONNX export flattens it in insertion order
+            # Order: class, mass, stiffness, material
+            output_names = ['class_logits', 'mass_logits', 'stiffness_logits', 'material_logits']
+        else:
+            output_names = ['class_logits']
+
+        try:
+             torch.onnx.export(
+                model_ft, 
+                dummy_input, 
+                onnx_path, 
+                verbose=False,
+                input_names=['input_image'],
+                output_names=output_names,
+                dynamic_axes={'input_image': {0: 'batch_size'}}
+            )
+             logger.info(f"✅ Model exported to: {onnx_path.resolve()}")
+        except Exception as e:
+            logger.error(f"❌ Failed to export to ONNX: {e}")
 
 if __name__ == '__main__':
     main()

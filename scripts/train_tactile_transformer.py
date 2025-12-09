@@ -34,6 +34,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.onnx
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, random_split
 from tqdm import tqdm
@@ -221,8 +222,12 @@ class MultiTaskTransformer(nn.Module):
 # =============================================================================
 class TactileSequenceDataset(Dataset):
     """
-    触觉序列数据集
+    触觉序列数据集（滑动窗口模式）
     从 Plaintextdataset 加载 tactile_data.pkl 文件
+    使用滑动窗口生成多个样本，充分利用时序数据
+    
+    重要：必须先按 Episode 划分 Train/Val，再对各自的 Episode 切窗口！
+    避免数据泄露（同一 Episode 的重叠窗口进入不同集合）
     """
     
     def __init__(
@@ -232,31 +237,54 @@ class TactileSequenceDataset(Dataset):
         stride: int = 64,
         normalize: bool = True,
         augment: bool = False,
+        episode_indices: Optional[List[int]] = None,  # 指定使用哪些 episode
+        stats: Optional[Tuple[np.ndarray, np.ndarray]] = None,  # 外部传入的 (mean, std)
     ):
         """
         Args:
             root_dir: 数据集根目录 (Plaintextdataset)
             context_len: 时间窗口长度
-            stride: 滑动窗口步长 (用于数据增强)
+            stride: 滑动窗口步长
             normalize: 是否标准化
             augment: 是否启用数据增强
+            episode_indices: 指定使用哪些 episode 的索引（用于 train/val 划分）
+            stats: 外部传入的标准化统计量 (mean, std)，验证集应使用训练集的统计量
         """
         self.root_dir = Path(root_dir)
         self.context_len = context_len
         self.stride = stride
         self.normalize = normalize
         self.augment = augment
+        self.episode_indices = episode_indices  # None 表示使用全部
         
-        self.samples: List[Tuple[Path, int]] = []  # (pkl_path, class_idx)
+        self.all_episodes: List[Tuple[Path, int]] = []  # 全部 (pkl_path, class_idx)
+        self.episodes: List[Tuple[Path, int]] = []  # 实际使用的 episodes
         self.classes: List[str] = []
         self.class_to_idx: Dict[str, int] = {}
         
-        # 用于标准化的统计量 (稍后计算)
+        # 滑动窗口索引: (episode_idx, window_start_idx)
+        self.window_indices: List[Tuple[int, int]] = []
+        
+        # 缓存每个 episode 的长度
+        self.episode_lengths: List[int] = []
+        
+        # 用于标准化的统计量
         self.mean: Optional[np.ndarray] = None
         self.std: Optional[np.ndarray] = None
         
+        # 缓存所有 episode 的特征数据（避免重复读取磁盘）
+        self.cached_features: List[np.ndarray] = []
+        
         self._find_classes_and_samples()
-        if self.normalize:
+        self._select_episodes()  # 根据 episode_indices 选择 episode
+        self._preload_all_data()  # 预加载所选 episode 数据到内存
+        self._build_window_indices()
+        
+        # 标准化统计量
+        if stats is not None:
+            self.mean, self.std = stats
+            logger.info(f"Using provided stats: mean shape={self.mean.shape}")
+        elif self.normalize:
             self._compute_stats()
     
     def _find_classes_and_samples(self):
@@ -273,37 +301,113 @@ class TactileSequenceDataset(Dataset):
         
         logger.info(f"Found {len(self.classes)} classes: {self.classes}")
         
-        # 收集所有样本
+        # 收集所有 episode
         for cls_name in self.classes:
             cls_dir = self.root_dir / cls_name
             cls_idx = self.class_to_idx[cls_name]
             
-            for ep_dir in cls_dir.iterdir():
+            for ep_dir in sorted(cls_dir.iterdir()):  # 排序保证可复现性
                 if not ep_dir.is_dir():
                     continue
                 pkl_path = ep_dir / "tactile_data.pkl"
                 if pkl_path.exists():
-                    self.samples.append((pkl_path, cls_idx))
+                    self.all_episodes.append((pkl_path, cls_idx))
         
-        logger.info(f"Found {len(self.samples)} tactile episodes.")
+        logger.info(f"Found {len(self.all_episodes)} tactile episodes.")
     
-    def _compute_stats(self, sample_size: int = 100):
-        """计算标准化统计量 (随机采样一部分数据)"""
-        logger.info("Computing normalization statistics...")
+    def _select_episodes(self):
+        """根据 episode_indices 选择要使用的 episode"""
+        if self.episode_indices is None:
+            # 使用全部 episode
+            self.episodes = self.all_episodes.copy()
+            logger.info(f"Using all {len(self.episodes)} episodes")
+        else:
+            # 使用指定的 episode
+            self.episodes = [self.all_episodes[i] for i in self.episode_indices]
+            logger.info(f"Using {len(self.episodes)} / {len(self.all_episodes)} episodes (indices provided)")
+    
+    def _preload_all_data(self):
+        """预加载所有 episode 数据到内存，避免训练时重复读取磁盘"""
+        logger.info("Preloading all tactile data into memory...")
         
-        sample_indices = random.sample(range(len(self.samples)), min(sample_size, len(self.samples)))
-        all_features = []
+        self.cached_features = []
+        total_memory = 0
         
-        for idx in tqdm(sample_indices, desc="Computing stats"):
-            pkl_path, _ = self.samples[idx]
+        for pkl_path, _ in tqdm(self.episodes, desc="Preloading"):
             features = self._load_and_extract_features(pkl_path)
-            all_features.append(features)
+            self.cached_features.append(features)
+            total_memory += features.nbytes
         
-        all_features = np.concatenate(all_features, axis=0)  # (N, D)
+        logger.info(f"Preloaded {len(self.cached_features)} episodes")
+        logger.info(f"Total memory usage: {total_memory / 1024 / 1024:.1f} MB")
+    
+    def _build_window_indices(self):
+        """构建滑动窗口索引（使用已缓存的数据）"""
+        logger.info("Building sliding window indices...")
+        
+        self.window_indices = []
+        self.episode_lengths = []
+        
+        for ep_idx, features in enumerate(self.cached_features):
+            T = features.shape[0]
+            self.episode_lengths.append(T)
+            
+            # 计算该 episode 可以生成的窗口数
+            if T >= self.context_len:
+                num_windows = (T - self.context_len) // self.stride + 1
+                for w_idx in range(num_windows):
+                    start = w_idx * self.stride
+                    self.window_indices.append((ep_idx, start))
+            else:
+                # 长度不足，只生成一个填充样本
+                self.window_indices.append((ep_idx, 0))
+        
+        logger.info(f"Generated {len(self.window_indices)} sliding windows from {len(self.episodes)} episodes")
+        logger.info(f"  Average windows per episode: {len(self.window_indices) / len(self.episodes):.1f}")
+    
+    def _compute_stats(self):
+        """计算标准化统计量（使用已缓存的全部数据）"""
+        logger.info("Computing normalization statistics from cached data...")
+        
+        # 直接使用所有缓存的数据计算统计量
+        all_features = np.concatenate(self.cached_features, axis=0)  # (N, D)
         self.mean = all_features.mean(axis=0)
         self.std = all_features.std(axis=0) + 1e-8  # 防止除零
         
-        logger.info(f"Computed stats: mean shape={self.mean.shape}, std shape={self.std.shape}")
+        logger.info(f"Computed stats from {all_features.shape[0]} samples: mean shape={self.mean.shape}")
+    
+    def get_stats(self) -> Tuple[np.ndarray, np.ndarray]:
+        """获取标准化统计量，用于传递给验证集"""
+        return self.mean, self.std
+    
+    @staticmethod
+    def get_all_episode_indices(root_dir: str) -> Tuple[List[int], List[str], int]:
+        """
+        静态方法：扫描数据集，返回所有 episode 的索引列表
+        用于在创建数据集之前进行 episode 级别的划分
+        
+        Returns:
+            episode_indices: 所有 episode 的索引 [0, 1, 2, ...]
+            classes: 类别名称列表
+            num_episodes: episode 总数
+        """
+        root_path = Path(root_dir)
+        classes = sorted([
+            d.name for d in root_path.iterdir()
+            if d.is_dir() and not d.name.startswith('.')
+        ])
+        
+        num_episodes = 0
+        for cls_name in classes:
+            cls_dir = root_path / cls_name
+            for ep_dir in sorted(cls_dir.iterdir()):
+                if not ep_dir.is_dir():
+                    continue
+                pkl_path = ep_dir / "tactile_data.pkl"
+                if pkl_path.exists():
+                    num_episodes += 1
+        
+        return list(range(num_episodes)), classes, num_episodes
     
     def _load_and_extract_features(self, pkl_path: Path) -> np.ndarray:
         """
@@ -331,82 +435,86 @@ class TactileSequenceDataset(Dataset):
         
         return features
     
-    def _sample_window(self, features: np.ndarray) -> np.ndarray:
+    def _extract_window(self, features: np.ndarray, start: int) -> Tuple[np.ndarray, np.ndarray]:
         """
-        从序列中采样固定长度窗口
+        从序列中提取固定长度窗口
         
         Args:
             features: (T, D) 原始特征
+            start: 窗口起始位置
         
         Returns:
             window: (context_len, D) 固定长度窗口
+            mask: (context_len,) padding mask (True=padding/ignore, False=valid)
         """
         T = features.shape[0]
+        mask = np.zeros(self.context_len, dtype=bool)  # False = valid
         
         if T >= self.context_len:
-            # 随机采样起点
-            if self.augment:
-                start = random.randint(0, T - self.context_len)
-            else:
-                # 取中间段
-                start = (T - self.context_len) // 2
-            window = features[start:start + self.context_len]
+            # 从指定位置提取窗口
+            end = start + self.context_len
+            if end > T:
+                # 如果超出边界，从末尾往前取
+                start = T - self.context_len
+                end = T
+            window = features[start:end]
         else:
             # 长度不足，填充
             pad_len = self.context_len - T
             window = np.pad(features, ((0, pad_len), (0, 0)), mode='constant', constant_values=0)
+            mask[T:] = True  # Mark padding as ignored
+        
+        return window, mask
+    
+    def _augment_window(self, window: np.ndarray) -> np.ndarray:
+        """
+        窗口数据增强（不改变长度）
+        
+        Args:
+            window: (context_len, D) 固定长度窗口
+        
+        Returns:
+            augmented: (context_len, D) 增强后的窗口
+        """
+        # 1. 随机噪声
+        if random.random() < 0.5:
+            noise_scale = 0.02 * (np.abs(window).mean() + 1e-8)
+            noise = np.random.randn(*window.shape) * noise_scale
+            window = window + noise.astype(np.float32)
+        
+        # 2. 随机幅度缩放
+        if random.random() < 0.3:
+            scale = random.uniform(0.95, 1.05)
+            window = window * scale
+        
+        # 3. 随机通道 dropout (模拟传感器故障)
+        if random.random() < 0.1:
+            num_channels = window.shape[1]
+            drop_idx = random.randint(0, num_channels - 1)
+            window[:, drop_idx] = 0
         
         return window
     
-    def _augment_sequence(self, features: np.ndarray) -> np.ndarray:
-        """
-        时序数据增强
-        
-        Args:
-            features: (T, D) 特征序列
-        
-        Returns:
-            augmented: (T, D) 增强后的序列
-        """
-        # 1. 随机时间缩放 (通过重采样)
-        if random.random() < 0.3:
-            scale = random.uniform(0.9, 1.1)
-            new_len = int(len(features) * scale)
-            if new_len > 10:
-                indices = np.linspace(0, len(features) - 1, new_len).astype(int)
-                features = features[indices]
-        
-        # 2. 随机噪声
-        if random.random() < 0.5:
-            noise = np.random.randn(*features.shape) * 0.02 * np.abs(features).mean()
-            features = features + noise.astype(np.float32)
-        
-        # 3. 随机缩放
-        if random.random() < 0.3:
-            scale = random.uniform(0.95, 1.05)
-            features = features * scale
-        
-        return features
-    
     def __len__(self):
-        return len(self.samples)
+        return len(self.window_indices)
     
     def __getitem__(self, idx):
-        pkl_path, class_idx = self.samples[idx]
+        ep_idx, window_start = self.window_indices[idx]
+        _, class_idx = self.episodes[ep_idx]
         
-        # 加载特征
-        features = self._load_and_extract_features(pkl_path)
+        # 从缓存获取特征（无需读取磁盘）
+        features = self.cached_features[ep_idx]
         
-        # 数据增强
+        # 提取窗口和 mask
+        window, mask = self._extract_window(features, window_start)
+        
+        # 数据增强（仅对窗口内数据）
         if self.augment:
-            features = self._augment_sequence(features)
-        
-        # 采样固定长度窗口
-        features = self._sample_window(features)
+            window = self._augment_window(window)
         
         # 标准化
         if self.normalize and self.mean is not None:
-            features = (features - self.mean) / self.std
+            window = (window - self.mean) / self.std
         
         # 获取物理属性标签
         class_name = self.classes[class_idx]
@@ -416,11 +524,13 @@ class TactileSequenceDataset(Dataset):
         material_idx = MATERIAL_TO_IDX.get(props.get('material', 'wood'), 2)
         
         return (
-            torch.from_numpy(features),
+            torch.from_numpy(window.astype(np.float32)),
+            torch.from_numpy(mask),
             class_idx,
             mass_idx,
             stiffness_idx,
             material_idx,
+            ep_idx,  # 返回 episode 索引，用于 episode 级别聚合
         )
 
 
@@ -591,8 +701,9 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None)
     
     pbar = tqdm(dataloader, desc="Training")
     for batch in pbar:
-        features, labels_class, labels_mass, labels_stiffness, labels_material = batch
+        features, mask, labels_class, labels_mass, labels_stiffness, labels_material, _ = batch  # 忽略 ep_idx
         features = features.to(device)
+        mask = mask.to(device)
         labels_class = labels_class.to(device)
         labels_mass = labels_mass.to(device)
         labels_stiffness = labels_stiffness.to(device)
@@ -600,7 +711,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None)
         
         optimizer.zero_grad()
         
-        outputs = model(features)
+        outputs = model(features, mask=mask)
         
         # 计算各任务损失
         loss_class = criterion(outputs['class'], labels_class)
@@ -638,7 +749,16 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None)
 
 @torch.no_grad()
 def evaluate(model, dataloader, criterion, device):
-    """评估模型"""
+    """
+    评估模型
+    
+    返回:
+        epoch_loss: 平均损失
+        epoch_acc: 窗口级别准确率 (window-level)
+        all_preds: 所有窗口的预测
+        all_labels: 所有窗口的标签
+        episode_acc: Episode 级别准确率 (episode-level, 多数投票)
+    """
     model.eval()
     
     running_loss = 0.0
@@ -647,16 +767,18 @@ def evaluate(model, dataloader, criterion, device):
     
     all_preds = {'class': [], 'mass': [], 'stiffness': [], 'material': []}
     all_labels = {'class': [], 'mass': [], 'stiffness': [], 'material': []}
+    all_ep_indices = []  # 记录每个窗口属于哪个 episode
     
     for batch in tqdm(dataloader, desc="Evaluating"):
-        features, labels_class, labels_mass, labels_stiffness, labels_material = batch
+        features, mask, labels_class, labels_mass, labels_stiffness, labels_material, ep_indices = batch
         features = features.to(device)
+        mask = mask.to(device)
         labels_class = labels_class.to(device)
         labels_mass = labels_mass.to(device)
         labels_stiffness = labels_stiffness.to(device)
         labels_material = labels_material.to(device)
         
-        outputs = model(features)
+        outputs = model(features, mask=mask)
         
         loss_class = criterion(outputs['class'], labels_class)
         loss_mass = criterion(outputs['mass'], labels_mass)
@@ -687,11 +809,61 @@ def evaluate(model, dataloader, criterion, device):
         all_labels['mass'].extend(labels_mass.cpu().numpy())
         all_labels['stiffness'].extend(labels_stiffness.cpu().numpy())
         all_labels['material'].extend(labels_material.cpu().numpy())
+        
+        all_ep_indices.extend(ep_indices.numpy())
     
     epoch_loss = running_loss / total_samples
-    epoch_acc = {k: v / total_samples for k, v in running_corrects.items()}
+    window_acc = {k: v / total_samples for k, v in running_corrects.items()}
     
-    return epoch_loss, epoch_acc, all_preds, all_labels
+    # =========================================================================
+    # Episode 级别准确率（多数投票）
+    # =========================================================================
+    episode_acc = compute_episode_accuracy(all_preds, all_labels, all_ep_indices)
+    
+    return epoch_loss, window_acc, all_preds, all_labels, episode_acc
+
+
+def compute_episode_accuracy(all_preds, all_labels, all_ep_indices):
+    """
+    计算 Episode 级别的准确率（多数投票聚合）
+    
+    对于每个 episode 的所有窗口预测，取出现次数最多的类别作为该 episode 的最终预测。
+    """
+    from collections import defaultdict, Counter
+    
+    # 按 episode 分组收集预测和标签
+    episode_preds = defaultdict(lambda: {'class': [], 'mass': [], 'stiffness': [], 'material': []})
+    episode_labels = {}  # 每个 episode 的真实标签（所有窗口标签相同）
+    
+    for i, ep_idx in enumerate(all_ep_indices):
+        for task in ['class', 'mass', 'stiffness', 'material']:
+            episode_preds[ep_idx][task].append(all_preds[task][i])
+        
+        # 记录标签（每个 episode 的标签是固定的）
+        if ep_idx not in episode_labels:
+            episode_labels[ep_idx] = {
+                'class': all_labels['class'][i],
+                'mass': all_labels['mass'][i],
+                'stiffness': all_labels['stiffness'][i],
+                'material': all_labels['material'][i],
+            }
+    
+    # 多数投票得到每个 episode 的最终预测
+    episode_corrects = {'class': 0, 'mass': 0, 'stiffness': 0, 'material': 0}
+    num_episodes = len(episode_preds)
+    
+    for ep_idx, preds in episode_preds.items():
+        true_labels = episode_labels[ep_idx]
+        
+        for task in ['class', 'mass', 'stiffness', 'material']:
+            # 多数投票
+            majority_pred = Counter(preds[task]).most_common(1)[0][0]
+            if majority_pred == true_labels[task]:
+                episode_corrects[task] += 1
+    
+    episode_acc = {k: v / num_episodes for k, v in episode_corrects.items()}
+    
+    return episode_acc
 
 
 def print_classification_report(all_preds, all_labels, class_names):
@@ -734,6 +906,143 @@ def print_classification_report(all_preds, all_labels, class_names):
         logger.warning("scikit-learn not installed, skipping classification report.")
 
 
+def plot_confusion_matrices(all_preds, all_labels, class_names, output_dir: Path):
+    """
+    绘制多任务混淆矩阵热力图
+    
+    Args:
+        all_preds: 预测结果字典
+        all_labels: 真实标签字典
+        class_names: 类别名称列表
+        output_dir: 输出目录
+    """
+    try:
+        from sklearn.metrics import confusion_matrix
+        import seaborn as sns
+    except ImportError:
+        logger.warning("sklearn or seaborn not installed, skipping confusion matrix plot.")
+        return
+    
+    # 准备各任务的标签名
+    task_configs = {
+        'class': {
+            'labels': class_names,
+            'title': 'Class Confusion Matrix',
+            'figsize': (14, 12),
+            'fontsize': 8,
+        },
+        'mass': {
+            'labels': list(MASS_TO_IDX.keys()),
+            'title': 'Mass Confusion Matrix',
+            'figsize': (8, 6),
+            'fontsize': 12,
+        },
+        'stiffness': {
+            'labels': list(STIFFNESS_TO_IDX.keys()),
+            'title': 'Stiffness Confusion Matrix',
+            'figsize': (8, 6),
+            'fontsize': 12,
+        },
+        'material': {
+            'labels': list(MATERIAL_TO_IDX.keys()),
+            'title': 'Material Confusion Matrix',
+            'figsize': (10, 8),
+            'fontsize': 10,
+        },
+    }
+    
+    # 创建 2x2 子图布局
+    fig, axes = plt.subplots(2, 2, figsize=(20, 18))
+    fig.suptitle('Tactile Transformer - Confusion Matrices', fontsize=16, fontweight='bold')
+    
+    task_list = ['class', 'mass', 'stiffness', 'material']
+    
+    for idx, task in enumerate(task_list):
+        ax = axes[idx // 2, idx % 2]
+        config = task_configs[task]
+        
+        # 计算混淆矩阵
+        cm = confusion_matrix(all_labels[task], all_preds[task])
+        
+        # 计算归一化混淆矩阵（按行归一化，即按真实标签归一化）
+        cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-8)
+        
+        # 绘制热力图
+        sns.heatmap(
+            cm_normalized,
+            annot=True,
+            fmt='.2f',
+            cmap='Blues',
+            xticklabels=config['labels'],
+            yticklabels=config['labels'],
+            ax=ax,
+            cbar=True,
+            square=True,
+            annot_kws={'fontsize': config['fontsize']},
+        )
+        
+        ax.set_title(config['title'], fontsize=14, fontweight='bold')
+        ax.set_xlabel('Predicted', fontsize=12)
+        ax.set_ylabel('True', fontsize=12)
+        
+        # 旋转标签以便阅读
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=config['fontsize'])
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=config['fontsize'])
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    
+    # 保存图片
+    save_path = output_dir / 'confusion_matrices.png'
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    logger.info(f"📊 Saved confusion matrices to {save_path}")
+    
+    plt.close(fig)
+    
+    # 同时生成单独的 Class 混淆矩阵（因为类别较多，单独保存一个大图）
+    fig_class, ax_class = plt.subplots(figsize=(16, 14))
+    
+    cm_class = confusion_matrix(all_labels['class'], all_preds['class'])
+    cm_class_norm = cm_class.astype('float') / (cm_class.sum(axis=1, keepdims=True) + 1e-8)
+    
+    # 同时显示数量和比例
+    annot_labels = []
+    for i in range(cm_class.shape[0]):
+        row = []
+        for j in range(cm_class.shape[1]):
+            count = cm_class[i, j]
+            pct = cm_class_norm[i, j]
+            row.append(f'{count}\n({pct:.1%})')
+        annot_labels.append(row)
+    annot_labels = np.array(annot_labels)
+    
+    sns.heatmap(
+        cm_class_norm,
+        annot=annot_labels,
+        fmt='',
+        cmap='Blues',
+        xticklabels=class_names,
+        yticklabels=class_names,
+        ax=ax_class,
+        cbar=True,
+        square=True,
+        annot_kws={'fontsize': 9},
+    )
+    
+    ax_class.set_title('Class Confusion Matrix (Tactile Transformer)', fontsize=16, fontweight='bold')
+    ax_class.set_xlabel('Predicted', fontsize=14)
+    ax_class.set_ylabel('True', fontsize=14)
+    ax_class.set_xticklabels(ax_class.get_xticklabels(), rotation=45, ha='right', fontsize=10)
+    ax_class.set_yticklabels(ax_class.get_yticklabels(), rotation=0, fontsize=10)
+    
+    plt.tight_layout()
+    
+    save_path_class = output_dir / 'confusion_matrix_class.png'
+    fig_class.savefig(save_path_class, dpi=150, bbox_inches='tight')
+    logger.info(f"📊 Saved class confusion matrix to {save_path_class}")
+    
+    plt.close(fig_class)
+
+
 def train(
     model: nn.Module,
     train_loader: DataLoader,
@@ -752,9 +1061,18 @@ def train(
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
-    # Cosine annealing scheduler
-    total_steps = len(train_loader) * num_epochs
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+    # Cosine annealing scheduler -> OneCycleLR (with Warmup)
+    # Transformer 训练通常需要 Warmup
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=learning_rate,
+        epochs=num_epochs,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.1,  # 10% warmup
+        anneal_strategy='cos',
+        div_factor=25.0,  # init_lr = max_lr / 25
+        final_div_factor=10000.0,  # min_lr = init_lr / 10000
+    )
     
     # 实时可视化
     plotter = MultiTaskLivePlotter(output_dir=output_dir)
@@ -782,7 +1100,11 @@ def train(
             
             # 恢复起始 epoch 和最佳准确率
             start_epoch = checkpoint['epoch'] + 1
-            best_acc = checkpoint['val_acc']['class']
+            # 优先使用 episode_acc（新格式），兼容旧 checkpoint
+            if 'episode_acc' in checkpoint:
+                best_acc = checkpoint['episode_acc']['class']
+            else:
+                best_acc = checkpoint['val_acc']['class']
             
             # 恢复训练历史（用于可视化）
             if 'history' in checkpoint:
@@ -804,11 +1126,13 @@ def train(
                    f"Stiffness: {train_acc['stiffness']:.4f} | Material: {train_acc['material']:.4f}")
         
         # 验证
-        val_loss, val_acc, all_preds, all_labels = evaluate(model, val_loader, criterion, device)
+        val_loss, val_acc, all_preds, all_labels, episode_acc = evaluate(model, val_loader, criterion, device)
         
         logger.info(f"Val Loss: {val_loss:.4f}")
-        logger.info(f"  Class: {val_acc['class']:.4f} | Mass: {val_acc['mass']:.4f} | "
+        logger.info(f"  [Window]  Class: {val_acc['class']:.4f} | Mass: {val_acc['mass']:.4f} | "
                    f"Stiffness: {val_acc['stiffness']:.4f} | Material: {val_acc['material']:.4f}")
+        logger.info(f"  [Episode] Class: {episode_acc['class']:.4f} | Mass: {episode_acc['mass']:.4f} | "
+                   f"Stiffness: {episode_acc['stiffness']:.4f} | Material: {episode_acc['material']:.4f}")
         
         # 更新可视化
         plotter.update(
@@ -824,30 +1148,42 @@ def train(
             val_acc_material=val_acc['material'],
         )
         
-        # 保存最佳模型 (基于 class accuracy)
-        if val_acc['class'] > best_acc:
-            best_acc = val_acc['class']
+        # 保存最佳模型 (基于 episode-level class accuracy，更可靠)
+        if episode_acc['class'] > best_acc:
+            best_acc = episode_acc['class']
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'val_acc': val_acc,
+                'episode_acc': episode_acc,
                 'val_loss': val_loss,
                 'history': plotter.history,  # 保存训练历史用于可视化恢复
             }, save_path)
-            logger.info(f"✅ Saved best model with Class Acc: {best_acc:.4f}")
+            logger.info(f"✅ Saved best model with Episode Class Acc: {best_acc:.4f}")
         
         # 最后一个 epoch 打印详细报告
         if epoch == num_epochs - 1:
             logger.info("\n" + "=" * 60)
             logger.info("Final Multi-Task Performance Summary:")
-            logger.info(f"  Class Accuracy:     {val_acc['class']:.4f}")
-            logger.info(f"  Mass Accuracy:      {val_acc['mass']:.4f}")
-            logger.info(f"  Stiffness Accuracy: {val_acc['stiffness']:.4f}")
-            logger.info(f"  Material Accuracy:  {val_acc['material']:.4f}")
+            logger.info("-" * 60)
+            logger.info("Window-Level Accuracy (每个窗口独立计算):")
+            logger.info(f"  Class:     {val_acc['class']:.4f}")
+            logger.info(f"  Mass:      {val_acc['mass']:.4f}")
+            logger.info(f"  Stiffness: {val_acc['stiffness']:.4f}")
+            logger.info(f"  Material:  {val_acc['material']:.4f}")
+            logger.info("-" * 60)
+            logger.info("Episode-Level Accuracy (多数投票聚合，更可靠):")
+            logger.info(f"  Class:     {episode_acc['class']:.4f}")
+            logger.info(f"  Mass:      {episode_acc['mass']:.4f}")
+            logger.info(f"  Stiffness: {episode_acc['stiffness']:.4f}")
+            logger.info(f"  Material:  {episode_acc['material']:.4f}")
             logger.info("=" * 60)
             print_classification_report(all_preds, all_labels, class_names)
+            
+            # 绘制混淆矩阵
+            plot_confusion_matrices(all_preds, all_labels, class_names, output_dir)
     
     logger.info(f"\nBest validation Class Accuracy: {best_acc:.4f}")
     
@@ -882,6 +1218,9 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Resume training from checkpoint')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint file (default: output_dir/tactile_transformer_best.pth)')
+    parser.add_argument('--eval-only', action='store_true',
+                        help='Only evaluate the model and generate confusion matrices (no training)')
+    parser.add_argument('--export-onnx', action='store_true', help='Export the best model to ONNX format')
     
     args = parser.parse_args()
     
@@ -901,53 +1240,69 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    # 加载数据集
-    logger.info("Loading dataset...")
-    full_dataset = TactileSequenceDataset(
+    # ==========================================================================
+    # ✅ 正确的划分方式：先按 Episode 划分，再分别切窗口
+    # 避免数据泄露（同一 Episode 的重叠窗口进入不同集合）
+    # ==========================================================================
+    logger.info("\n" + "=" * 60)
+    logger.info("⚠️  IMPORTANT: Splitting at EPISODE level (not window level)")
+    logger.info("    This prevents data leakage from overlapping windows!")
+    logger.info("=" * 60 + "\n")
+    
+    # Step 1: 获取所有 episode 索引
+    all_ep_indices, classes, num_episodes = TactileSequenceDataset.get_all_episode_indices(str(dataset_root))
+    
+    # Step 2: 按 Episode 划分 Train/Val (80/20)
+    num_train_eps = int(0.8 * num_episodes)
+    
+    # 使用固定随机种子打乱 episode 顺序
+    rng = random.Random(args.seed)
+    shuffled_indices = all_ep_indices.copy()
+    rng.shuffle(shuffled_indices)
+    
+    train_ep_indices = sorted(shuffled_indices[:num_train_eps])
+    val_ep_indices = sorted(shuffled_indices[num_train_eps:])
+    
+    logger.info(f"Episode split: {len(train_ep_indices)} train / {len(val_ep_indices)} val")
+    
+    # Step 3: 创建训练集（使用训练 episodes，计算标准化统计量）
+    logger.info("\nLoading training dataset...")
+    train_dataset = TactileSequenceDataset(
         root_dir=str(dataset_root),
         context_len=args.context_len,
         normalize=True,
         augment=not args.no_augment,
+        episode_indices=train_ep_indices,
+        stats=None,  # 训练集自己计算 stats
     )
     
-    # 划分训练/验证集
-    dataset_size = len(full_dataset)
-    train_size = int(0.8 * dataset_size)
-    val_size = dataset_size - train_size
-    train_dataset, val_dataset = random_split(
-        full_dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(args.seed)
-    )
-    
-    # 验证集不使用数据增强
-    # (由于使用了 random_split，需要创建一个新的数据集实例或者包装器)
-    val_dataset_no_aug = TactileSequenceDataset(
+    # Step 4: 创建验证集（使用验证 episodes，复用训练集的统计量）
+    logger.info("\nLoading validation dataset...")
+    val_dataset = TactileSequenceDataset(
         root_dir=str(dataset_root),
         context_len=args.context_len,
         normalize=True,
-        augment=False,
+        augment=False,  # 验证集不增强
+        episode_indices=val_ep_indices,
+        stats=train_dataset.get_stats(),  # 使用训练集的 mean/std
     )
-    val_dataset_no_aug.mean = full_dataset.mean
-    val_dataset_no_aug.std = full_dataset.std
-    
-    # 重新划分以获得相同的验证集索引
-    _, val_indices = random_split(
-        range(dataset_size), [train_size, val_size],
-        generator=torch.Generator().manual_seed(args.seed)
-    )
-    val_dataset = torch.utils.data.Subset(val_dataset_no_aug, val_indices.indices)
     
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, pin_memory=True
+        num_workers=args.num_workers, pin_memory=True,
+        persistent_workers=(args.num_workers > 0),  # 保持 worker 进程存活
+        prefetch_factor=4 if args.num_workers > 0 else None,  # 预取更多批次
     )
     val_loader = DataLoader(
         val_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, pin_memory=True
+        num_workers=args.num_workers, pin_memory=True,
+        persistent_workers=(args.num_workers > 0),
+        prefetch_factor=4 if args.num_workers > 0 else None,
     )
     
-    logger.info(f"Training samples: {len(train_dataset)}, Validation samples: {len(val_dataset)}")
-    logger.info(f"Classes: {full_dataset.classes}")
+    logger.info(f"\nTraining windows: {len(train_dataset)} (from {len(train_ep_indices)} episodes)")
+    logger.info(f"Validation windows: {len(val_dataset)} (from {len(val_ep_indices)} episodes)")
+    logger.info(f"Classes: {train_dataset.classes}")
     
     # 模型配置
     cfg = MultiTaskTransformerConfig(
@@ -958,7 +1313,7 @@ def main():
         n_layers=args.n_layers,
         dim_feedforward=args.d_model * 2,
         dropout=0.1,
-        num_classes=len(full_dataset.classes),
+        num_classes=len(train_dataset.classes),
         num_mass=len(MASS_TO_IDX),
         num_stiffness=len(STIFFNESS_TO_IDX),
         num_material=len(MATERIAL_TO_IDX),
@@ -979,8 +1334,81 @@ def main():
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"  Total trainable parameters: {num_params:,}")
     
-    # 训练
-    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+    # 确定检查点路径
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else output_dir / 'tactile_transformer_best.pth'
+    
+    # Eval-only 模式：仅加载权重并评估
+    if args.eval_only:
+        logger.info("\n📊 Eval-only mode: Loading checkpoint and generating confusion matrices...")
+        
+        if not checkpoint_path.exists():
+            logger.error(f"❌ Checkpoint not found: {checkpoint_path}")
+            logger.error("Please train a model first or specify --checkpoint path")
+            return
+        
+        # 加载模型权重
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        logger.info(f"✅ Loaded checkpoint from {checkpoint_path}")
+        logger.info(f"   Checkpoint epoch: {checkpoint.get('epoch', 'N/A')}")
+        logger.info(f"   Checkpoint val_acc: {checkpoint.get('val_acc', 'N/A')}")
+        
+        # 评估
+        criterion = nn.CrossEntropyLoss()
+        val_loss, val_acc, all_preds, all_labels, episode_acc = evaluate(model, val_loader, criterion, device)
+        
+        logger.info("\n" + "=" * 60)
+        logger.info("Evaluation Results:")
+        logger.info(f"  Val Loss: {val_loss:.4f}")
+        logger.info("-" * 60)
+        logger.info("Window-Level Accuracy (每个窗口独立计算):")
+        logger.info(f"  Class:     {val_acc['class']:.4f}")
+        logger.info(f"  Mass:      {val_acc['mass']:.4f}")
+        logger.info(f"  Stiffness: {val_acc['stiffness']:.4f}")
+        logger.info(f"  Material:  {val_acc['material']:.4f}")
+        logger.info("-" * 60)
+        logger.info("Episode-Level Accuracy (多数投票聚合，更可靠):")
+        logger.info(f"  Class:     {episode_acc['class']:.4f}")
+        logger.info(f"  Mass:      {episode_acc['mass']:.4f}")
+        logger.info(f"  Stiffness: {episode_acc['stiffness']:.4f}")
+        logger.info(f"  Material:  {episode_acc['material']:.4f}")
+        logger.info("=" * 60)
+        
+        # 打印分类报告
+        print_classification_report(all_preds, all_labels, train_dataset.classes)
+        
+        # 生成混淆矩阵
+        plot_confusion_matrices(all_preds, all_labels, train_dataset.classes, output_dir)
+        
+        # Eval-only 模式下的 ONNX 导出
+        if args.export_onnx:
+            logger.info("\nExporting model to ONNX (Eval-only mode)...")
+            onnx_path = output_dir / 'tactile_transformer.onnx'
+            
+            model.eval()
+            # 创建 dummy input: (batch=1, seq_len, input_dim=24)
+            dummy_input = torch.randn(1, args.context_len, 24, device=device)
+            
+            output_names = ['class_logits', 'mass_logits', 'stiffness_logits', 'material_logits']
+            
+            try:
+                torch.onnx.export(
+                    model, 
+                    dummy_input, 
+                    onnx_path, 
+                    verbose=False,
+                    input_names=['tactile_sequence'],
+                    output_names=output_names,
+                    dynamic_axes={'tactile_sequence': {0: 'batch_size'}}
+                )
+                logger.info(f"✅ Model exported to: {onnx_path.resolve()}")
+            except Exception as e:
+                logger.error(f"❌ Failed to export to ONNX: {e}")
+        
+        logger.info("\n✅ Evaluation complete!")
+        return
+    
+    # 正常训练模式
     if args.resume:
         logger.info("\n🔄 Resume mode enabled")
     else:
@@ -995,15 +1423,15 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         output_dir=output_dir,
-        class_names=full_dataset.classes,
+        class_names=train_dataset.classes,
         resume=args.resume,
-        checkpoint_path=checkpoint_path,
+        checkpoint_path=checkpoint_path if args.resume else None,
     )
     
     # 保存类别名和配置
     class_names_path = output_dir / 'tactile_class_names.txt'
     with open(class_names_path, 'w') as f:
-        for cls in full_dataset.classes:
+        for cls in train_dataset.classes:
             f.write(f"{cls}\n")
     logger.info(f"Saved class names to {class_names_path}")
     
@@ -1021,16 +1449,54 @@ def main():
         'num_mass': cfg.num_mass,
         'num_stiffness': cfg.num_stiffness,
         'num_material': cfg.num_material,
-        'classes': full_dataset.classes,
+        'classes': train_dataset.classes,
         'normalization': {
-            'mean': full_dataset.mean.tolist(),
-            'std': full_dataset.std.tolist(),
+            'mean': train_dataset.mean.tolist(),
+            'std': train_dataset.std.tolist(),
         }
     }
     with open(config_path, 'w') as f:
         json.dump(config_dict, f, indent=2)
     logger.info(f"Saved config to {config_path}")
     
+    # Export to ONNX
+    if args.export_onnx:
+        logger.info("Exporting model to ONNX...")
+        onnx_path = output_dir / 'tactile_transformer.onnx'
+        
+        # Load best weights
+        if checkpoint_path.exists():
+             try:
+                 checkpoint = torch.load(checkpoint_path, map_location=device)
+                 if 'model_state_dict' in checkpoint:
+                     model.load_state_dict(checkpoint['model_state_dict'])
+                 else:
+                     model.load_state_dict(checkpoint) # In case it's just state dict
+             except Exception as e:
+                 logger.warning(f"Could not load checkpoint for export, using current weights: {e}")
+        
+        model.eval()
+        # Input shape: (Batch, Context_Len, Input_Dim)
+        dummy_input = torch.randn(1, cfg.context_len, cfg.input_dim, device=device)
+        
+        # Output order in forward: class, mass, stiffness, material
+        output_names = ['class_logits', 'mass_logits', 'stiffness_logits', 'material_logits']
+        
+        try:
+             # We only provide the first argument (x_seq), mask is optional and defaults to None
+             torch.onnx.export(
+                model, 
+                dummy_input, 
+                onnx_path, 
+                verbose=False,
+                input_names=['tactile_sequence'],
+                output_names=output_names,
+                dynamic_axes={'tactile_sequence': {0: 'batch_size'}}
+            )
+             logger.info(f"✅ Model exported to: {onnx_path.resolve()}")
+        except Exception as e:
+            logger.error(f"❌ Failed to export to ONNX: {e}")
+
     logger.info("\n✅ Training complete!")
 
 
