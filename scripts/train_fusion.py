@@ -1330,11 +1330,10 @@ if __name__ == '__main__':
             'save_every': 10,
             'live_plot': not getattr(args, 'no_plot', False),  # 实时绘图开关
         }
-        
         train(config)
     
     elif args.mode == 'test':
-        # ========== 测试模式 ==========
+        # ========== 测试模式 =========
         print("=" * 50)
         print("测试 RoboticGraspDataset")
         print("=" * 50)
