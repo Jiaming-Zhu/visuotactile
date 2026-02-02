@@ -1,0 +1,226 @@
+{
+  "checkpoint_epoch": 56,
+  "val_loss": 1.9372685089513293,
+  "window_level_accuracy": {
+    "class": 0.539616497829233,
+    "mass": 0.7930535455861071,
+    "stiffness": 0.8216353111432706,
+    "material": 0.7767727930535456
+  },
+  "episode_level_accuracy": {
+    "class": 0.6176470588235294,
+    "mass": 0.8970588235294118,
+    "stiffness": 0.8676470588235294,
+    "material": 0.8602941176470589
+  },
+  "per_task_metrics": {
+    "class": {
+      "per_class": {
+        "CardboardBox_Hollow": {
+          "precision": 0.6363636363636364,
+          "recall": 0.2074074074074074,
+          "f1_score": 0.3128491620111732,
+          "support": 405
+        },
+        "CardboardBox_RockFilled": {
+          "precision": 0.6839080459770115,
+          "recall": 0.2448559670781893,
+          "f1_score": 0.3606060606060606,
+          "support": 486
+        },
+        "CardboardBox_RockFilled_Red": {
+          "precision": 0.5456349206349206,
+          "recall": 0.8396946564885496,
+          "f1_score": 0.6614552014431749,
+          "support": 655
+        },
+        "CardboardBox_SpongeFilled": {
+          "precision": 0.5958188153310104,
+          "recall": 0.3825503355704698,
+          "f1_score": 0.4659400544959128,
+          "support": 447
+        },
+        "Sponge_Blue": {
+          "precision": 0.6130306021717671,
+          "recall": 0.9583333333333334,
+          "f1_score": 0.7477423239012643,
+          "support": 648
+        },
+        "WoodBlock_Foil": {
+          "precision": 0.5700636942675159,
+          "recall": 0.3145869947275923,
+          "f1_score": 0.40543601359003395,
+          "support": 569
+        },
+        "WoodBlock_Native": {
+          "precision": 0.5844155844155844,
+          "recall": 0.6441717791411042,
+          "f1_score": 0.6128404669260701,
+          "support": 489
+        },
+        "WoodBlock_Red": {
+          "precision": 0.46065808297567956,
+          "recall": 0.7219730941704036,
+          "f1_score": 0.5624454148471616,
+          "support": 446
+        },
+        "YogaBrick_Blue": {
+          "precision": 0.45185185185185184,
+          "recall": 0.8827785817655571,
+          "f1_score": 0.5977462028417443,
+          "support": 691
+        },
+        "YogaBrick_Native": {
+          "precision": 1.0,
+          "recall": 0.017341040462427744,
+          "f1_score": 0.03409090909090909,
+          "support": 692
+        }
+      },
+      "macro_avg": {
+        "precision": 0.6141745233988978,
+        "recall": 0.5213693190145035,
+        "f1_score": 0.47611518097535044
+      },
+      "weighted_avg": {
+        "precision": 0.620640538025047,
+        "recall": 0.539616497829233,
+        "f1_score": 0.4786324373368322
+      }
+    },
+    "mass": {
+      "per_class": {
+        "very_low": {
+          "precision": 0.8128755364806867,
+          "recall": 0.6313333333333333,
+          "f1_score": 0.7106941838649156,
+          "support": 1500
+        },
+        "low": {
+          "precision": 0.7959028831562974,
+          "recall": 0.7584960231381056,
+          "f1_score": 0.7767493520918178,
+          "support": 1383
+        },
+        "medium": {
+          "precision": 0.734789391575663,
+          "recall": 0.9394946808510638,
+          "f1_score": 0.8246279544791363,
+          "support": 1504
+        },
+        "high": {
+          "precision": 0.8689839572192514,
+          "recall": 0.8545135845749343,
+          "f1_score": 0.8616880247459126,
+          "support": 1141
+        }
+      },
+      "macro_avg": {
+        "precision": 0.8031379421079746,
+        "recall": 0.7959594054743593,
+        "f1_score": 0.7934398787954455
+      },
+      "weighted_avg": {
+        "precision": 0.7989654363681535,
+        "recall": 0.7930535455861071,
+        "f1_score": 0.7893835219811984
+      }
+    },
+    "stiffness": {
+      "per_class": {
+        "very_soft": {
+          "precision": 0.8202247191011236,
+          "recall": 0.9012345679012346,
+          "f1_score": 0.8588235294117647,
+          "support": 648
+        },
+        "soft": {
+          "precision": 0.8864468864468864,
+          "recall": 0.284037558685446,
+          "f1_score": 0.43022222222222223,
+          "support": 852
+        },
+        "medium": {
+          "precision": 0.7451763140385895,
+          "recall": 0.8098336948662328,
+          "f1_score": 0.7761607761607762,
+          "support": 1383
+        },
+        "rigid": {
+          "precision": 0.8539473684210527,
+          "recall": 0.9814744801512287,
+          "f1_score": 0.9132805628847845,
+          "support": 2645
+        }
+      },
+      "macro_avg": {
+        "precision": 0.826448822001913,
+        "recall": 0.7441450754010355,
+        "f1_score": 0.7446217726698868
+      },
+      "weighted_avg": {
+        "precision": 0.8277908822393866,
+        "recall": 0.8216353111432706,
+        "f1_score": 0.7981411763120053
+      }
+    },
+    "material": {
+      "per_class": {
+        "sponge": {
+          "precision": 0.8202247191011236,
+          "recall": 0.9012345679012346,
+          "f1_score": 0.8588235294117647,
+          "support": 648
+        },
+        "foam": {
+          "precision": 0.7319790301441678,
+          "recall": 0.8076644974692697,
+          "f1_score": 0.7679614987968374,
+          "support": 1383
+        },
+        "wood": {
+          "precision": 0.7283887468030691,
+          "recall": 0.9468085106382979,
+          "f1_score": 0.8233593524139925,
+          "support": 1504
+        },
+        "hollow_container": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 405
+        },
+        "filled_container": {
+          "precision": 0.876311844077961,
+          "recall": 0.7361460957178841,
+          "f1_score": 0.8001368925393566,
+          "support": 1588
+        }
+      },
+      "macro_avg": {
+        "precision": 0.6313808680252644,
+        "recall": 0.6783707343453372,
+        "f1_score": 0.6500562546323903
+      },
+      "weighted_avg": {
+        "precision": 0.7291809877450308,
+        "recall": 0.7767727930535456,
+        "f1_score": 0.7466639383643258
+      }
+    }
+  },
+  "model_config": {
+    "input_dim": 24,
+    "context_len": 256,
+    "d_model": 128,
+    "n_heads": 4,
+    "n_layers": 4,
+    "dim_feedforward": 256,
+    "dropout": 0.1,
+    "num_classes": 10,
+    "num_mass": 4,
+    "num_stiffness": 4,
+    "num_material": 5,
+    "trainable_parameters": 576919
+  }
+}

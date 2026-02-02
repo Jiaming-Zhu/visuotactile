@@ -1,0 +1,312 @@
+{
+  "experiments": [
+    {
+      "hold_out_object": "CardboardBox_Hollow",
+      "train_samples": 628,
+      "test_samples": 50,
+      "train_time_minutes": 1.0038049658139547,
+      "accuracy": {
+        "mass": 1.0,
+        "stiffness": 1.0,
+        "material": 0.0,
+        "average": 0.6666666666666666
+      },
+      "ground_truth": {
+        "mass": "very_low",
+        "stiffness": "soft",
+        "material": "hollow_container"
+      },
+      "predictions": {
+        "mass": {
+          "0": 50
+        },
+        "stiffness": {
+          "1": 50
+        },
+        "material": {
+          "4": 50
+        }
+      }
+    },
+    {
+      "hold_out_object": "CardboardBox_RockFilled",
+      "train_samples": 628,
+      "test_samples": 50,
+      "train_time_minutes": 1.0648895740509032,
+      "accuracy": {
+        "mass": 1.0,
+        "stiffness": 1.0,
+        "material": 1.0,
+        "average": 1.0
+      },
+      "ground_truth": {
+        "mass": "high",
+        "stiffness": "rigid",
+        "material": "filled_container"
+      },
+      "predictions": {
+        "mass": {
+          "3": 50
+        },
+        "stiffness": {
+          "3": 50
+        },
+        "material": {
+          "4": 50
+        }
+      }
+    },
+    {
+      "hold_out_object": "CardboardBox_RockFilled_Red",
+      "train_samples": 598,
+      "test_samples": 80,
+      "train_time_minutes": 0.975825834274292,
+      "accuracy": {
+        "mass": 1.0,
+        "stiffness": 1.0,
+        "material": 1.0,
+        "average": 1.0
+      },
+      "ground_truth": {
+        "mass": "high",
+        "stiffness": "rigid",
+        "material": "filled_container"
+      },
+      "predictions": {
+        "mass": {
+          "3": 80
+        },
+        "stiffness": {
+          "3": 80
+        },
+        "material": {
+          "4": 80
+        }
+      }
+    },
+    {
+      "hold_out_object": "CardboardBox_SpongeFilled",
+      "train_samples": 628,
+      "test_samples": 50,
+      "train_time_minutes": 1.023823050657908,
+      "accuracy": {
+        "mass": 0.96,
+        "stiffness": 0.96,
+        "material": 0.0,
+        "average": 0.64
+      },
+      "ground_truth": {
+        "mass": "very_low",
+        "stiffness": "soft",
+        "material": "filled_container"
+      },
+      "predictions": {
+        "mass": {
+          "0": 48,
+          "1": 1,
+          "2": 1
+        },
+        "stiffness": {
+          "1": 48,
+          "2": 1,
+          "3": 1
+        },
+        "material": {
+          "3": 48,
+          "1": 1,
+          "2": 1
+        }
+      }
+    },
+    {
+      "hold_out_object": "Sponge_Blue",
+      "train_samples": 598,
+      "test_samples": 80,
+      "train_time_minutes": 0.9815011580785116,
+      "accuracy": {
+        "mass": 0.0,
+        "stiffness": 0.0,
+        "material": 0.0,
+        "average": 0.0
+      },
+      "ground_truth": {
+        "mass": "very_low",
+        "stiffness": "very_soft",
+        "material": "sponge"
+      },
+      "predictions": {
+        "mass": {
+          "1": 80
+        },
+        "stiffness": {
+          "2": 80
+        },
+        "material": {
+          "1": 80
+        }
+      }
+    },
+    {
+      "hold_out_object": "WoodBlock_Foil",
+      "train_samples": 598,
+      "test_samples": 80,
+      "train_time_minutes": 0.9851248780886332,
+      "accuracy": {
+        "mass": 0.9,
+        "stiffness": 0.9125,
+        "material": 0.875,
+        "average": 0.8958333333333334
+      },
+      "ground_truth": {
+        "mass": "medium",
+        "stiffness": "rigid",
+        "material": "wood"
+      },
+      "predictions": {
+        "mass": {
+          "2": 72,
+          "1": 8
+        },
+        "stiffness": {
+          "3": 73,
+          "2": 7
+        },
+        "material": {
+          "2": 70,
+          "1": 10
+        }
+      }
+    },
+    {
+      "hold_out_object": "WoodBlock_Native",
+      "train_samples": 598,
+      "test_samples": 80,
+      "train_time_minutes": 0.9964577396710713,
+      "accuracy": {
+        "mass": 0.725,
+        "stiffness": 0.8125,
+        "material": 0.625,
+        "average": 0.7208333333333333
+      },
+      "ground_truth": {
+        "mass": "medium",
+        "stiffness": "rigid",
+        "material": "wood"
+      },
+      "predictions": {
+        "mass": {
+          "2": 58,
+          "0": 22
+        },
+        "stiffness": {
+          "3": 65,
+          "1": 15
+        },
+        "material": {
+          "2": 50,
+          "4": 30
+        }
+      }
+    },
+    {
+      "hold_out_object": "WoodBlock_Red",
+      "train_samples": 598,
+      "test_samples": 80,
+      "train_time_minutes": 0.9932971517244975,
+      "accuracy": {
+        "mass": 1.0,
+        "stiffness": 1.0,
+        "material": 1.0,
+        "average": 1.0
+      },
+      "ground_truth": {
+        "mass": "medium",
+        "stiffness": "rigid",
+        "material": "wood"
+      },
+      "predictions": {
+        "mass": {
+          "2": 80
+        },
+        "stiffness": {
+          "3": 80
+        },
+        "material": {
+          "2": 80
+        }
+      }
+    },
+    {
+      "hold_out_object": "YogaBrick_Blue",
+      "train_samples": 600,
+      "test_samples": 78,
+      "train_time_minutes": 1.0061247070630392,
+      "accuracy": {
+        "mass": 0.0,
+        "stiffness": 0.0,
+        "material": 0.0,
+        "average": 0.0
+      },
+      "ground_truth": {
+        "mass": "low",
+        "stiffness": "medium",
+        "material": "foam"
+      },
+      "predictions": {
+        "mass": {
+          "0": 78
+        },
+        "stiffness": {
+          "3": 17,
+          "1": 61
+        },
+        "material": {
+          "2": 36,
+          "3": 38,
+          "0": 4
+        }
+      }
+    },
+    {
+      "hold_out_object": "YogaBrick_Native",
+      "train_samples": 628,
+      "test_samples": 50,
+      "train_time_minutes": 1.0563419103622436,
+      "accuracy": {
+        "mass": 0.0,
+        "stiffness": 0.0,
+        "material": 0.0,
+        "average": 0.0
+      },
+      "ground_truth": {
+        "mass": "low",
+        "stiffness": "medium",
+        "material": "foam"
+      },
+      "predictions": {
+        "mass": {
+          "0": 46,
+          "2": 4
+        },
+        "stiffness": {
+          "1": 34,
+          "3": 15,
+          "0": 1
+        },
+        "material": {
+          "4": 47,
+          "2": 3
+        }
+      }
+    }
+  ],
+  "summary": {
+    "num_objects": 10,
+    "average_accuracy": {
+      "mass": 0.6585,
+      "stiffness": 0.6685,
+      "material": 0.45,
+      "average": 0.5923333333333333
+    }
+  }
+}
