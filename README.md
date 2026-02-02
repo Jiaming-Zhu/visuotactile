@@ -20,42 +20,9 @@ This project implements a **ResNet-Transformer fusion architecture** that predic
 
 ## Architecture
 
-```
-┌─────────────────┐     ┌─────────────────┐
-│  Visual Input   │     │  Tactile Input  │
-│  (224×224 RGB)  │     │  (24×T series)  │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-    ┌────▼────┐             ┌────▼────┐
-    │ ResNet18│             │ 1D-CNN  │
-    │ (frozen)│             │ Encoder │
-    └────┬────┘             └────┬────┘
-         │                       │
-    ┌────▼────┐             ┌────▼────┐
-    │ 49 tokens│            │ T/8 tokens│
-    │ (256-dim)│            │ (256-dim) │
-    └────┬────┘             └────┬────┘
-         │                       │
-         └───────────┬───────────┘
-                     │
-              ┌──────▼──────┐
-              │ [CLS] Token │
-              │ + Concat    │
-              └──────┬──────┘
-                     │
-              ┌──────▼──────┐
-              │ Transformer │
-              │  Encoder    │
-              │ (4 layers)  │
-              └──────┬──────┘
-                     │
-         ┌───────────┼───────────┐
-         │           │           │
-    ┌────▼────┐ ┌────▼────┐ ┌────▼────┐
-    │  Mass   │ │Stiffness│ │Material │
-    │  Head   │ │  Head   │ │  Head   │
-    └─────────┘ └─────────┘ └─────────┘
-```
+![Fusion Model Architecture](assets/fusionModel.png)
+
+*The fusion model combines visual features (ResNet18) and tactile features (1D-CNN) through a Transformer encoder, outputting predictions for mass, stiffness, and material.*
 
 ## Project Structure
 
@@ -168,18 +135,7 @@ Plaintextdataset/
 - **Camera**: USB webcam (640×480)
 - **Controller**: Raspberry Pi / Linux PC
 
-## Citation
 
-If you use this code in your research, please cite:
-
-```bibtex
-@misc{visuotactile2025,
-  title={Visual-Tactile Fusion for Robotic Object Property Estimation},
-  author={Your Name},
-  year={2025},
-  howpublished={\url{https://github.com/yourusername/visuotactile}}
-}
-```
 
 ## License
 
