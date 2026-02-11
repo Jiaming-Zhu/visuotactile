@@ -627,7 +627,38 @@ class FusionLivePlotter:
 # 训练相关函数
 # ============================================================================
 
-def train_one_epoch(model, train_loader, criterion, optimizer, device, epoch):
+def apply_modality_dropout(images, tactile, visual_drop_prob=0.0, tactile_drop_prob=0.0):
+    """
+    训练时随机屏蔽模态 (Modality Dropout)
+    
+    Args:
+        images: 视觉输入 (B, C, H, W)
+        tactile: 触觉输入 (B, C, T)
+        visual_drop_prob: 视觉屏蔽概率 (0-1)
+        tactile_drop_prob: 触觉屏蔽概率 (0-1)
+    
+    Returns:
+        images, tactile: 可能被屏蔽的输入
+    """
+    batch_size = images.size(0)
+    device = images.device
+    
+    # 每个样本独立随机决定是否屏蔽
+    if visual_drop_prob > 0:
+        vis_mask = (torch.rand(batch_size, device=device) < visual_drop_prob)
+        vis_mask = vis_mask.view(-1, 1, 1, 1).float()
+        images = images * (1 - vis_mask)  # 屏蔽的样本置零
+    
+    if tactile_drop_prob > 0:
+        tac_mask = (torch.rand(batch_size, device=device) < tactile_drop_prob)
+        tac_mask = tac_mask.view(-1, 1, 1).float()
+        tactile = tactile * (1 - tac_mask)  # 屏蔽的样本置零
+    
+    return images, tactile
+
+
+def train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, 
+                    visual_drop_prob=0.0, tactile_drop_prob=0.0):
     """
     训练一个 epoch
     
@@ -651,6 +682,13 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device, epoch):
         mass_labels = batch['mass'].to(device)
         stiffness_labels = batch['stiffness'].to(device)
         material_labels = batch['material'].to(device)
+        
+        # === 应用模态 Dropout ===
+        images, tactile = apply_modality_dropout(
+            images, tactile, 
+            visual_drop_prob=visual_drop_prob, 
+            tactile_drop_prob=tactile_drop_prob
+        )
         
         # 前向传播
         optimizer.zero_grad()
@@ -849,8 +887,12 @@ def train(config):
     for epoch in range(1, num_epochs + 1):
         epoch_start = time.time()
         
-        # 训练
-        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch)
+        # 训练 (应用模态 Dropout)
+        train_metrics = train_one_epoch(
+            model, train_loader, criterion, optimizer, device, epoch,
+            visual_drop_prob=config.get('visual_drop_prob', 0.0),
+            tactile_drop_prob=config.get('tactile_drop_prob', 0.0)
+        )
         
         # 验证
         val_metrics = evaluate(model, val_loader, criterion, device)
@@ -1277,6 +1319,10 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help='模型检查点路径 (eval模式必需)')
     parser.add_argument('--output_dir', type=str, default=None, help='评估结果输出目录 (默认与checkpoint同目录)')
     parser.add_argument('--no-plot', action='store_true', help='禁用实时绘图')
+    parser.add_argument('--visual_drop_prob', type=float, default=0.0, 
+                        help='训练时视觉模态屏蔽概率 (0-1, 默认0=不屏蔽)')
+    parser.add_argument('--tactile_drop_prob', type=float, default=0.0, 
+                        help='训练时触觉模态屏蔽概率 (0-1, 默认0=不屏蔽)')
     
     args = parser.parse_args()
     
@@ -1329,7 +1375,20 @@ if __name__ == '__main__':
             'save_dir': args.save_dir,
             'save_every': 10,
             'live_plot': not getattr(args, 'no_plot', False),  # 实时绘图开关
+            
+            # 模态 Dropout (训练时随机屏蔽)
+            'visual_drop_prob': args.visual_drop_prob,
+            'tactile_drop_prob': args.tactile_drop_prob,
         }
+        
+        # 打印模态 Dropout 配置
+        if args.visual_drop_prob > 0 or args.tactile_drop_prob > 0:
+            print("=" * 50)
+            print("🎲 模态 Dropout 配置:")
+            print(f"   视觉屏蔽概率: {args.visual_drop_prob:.0%}")
+            print(f"   触觉屏蔽概率: {args.tactile_drop_prob:.0%}")
+            print("=" * 50)
+        
         train(config)
     
     elif args.mode == 'test':
