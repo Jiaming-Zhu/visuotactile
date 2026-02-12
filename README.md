@@ -28,11 +28,12 @@ This project implements a **ResNet-Transformer fusion architecture** that predic
 
 ```
 visuotactile/
-├── scripts/                    # Training & evaluation scripts
-│   ├── train_fusion.py         # Main fusion model training
-│   ├── gradcam_visualize.py    # GradCAM visualization
+├── scripts/                    # Training & utility scripts
+│   ├── train_fusion.py         # Main training/evaluation entrypoint
 │   ├── clean_dataset_ui.py     # Streamlit dataset cleaner
-│   └── analyze_dataset.py      # Dataset statistics
+│   ├── find_defaultSetting.py  # Runtime/default setting helper
+│   ├── visualize_rrc.py        # Plot helper
+│   └── visualize_plaintext_dataset.py
 │
 ├── outputs/                    # Model checkpoints & results
 │   ├── fusion_model/           # Fusion model weights
@@ -63,15 +64,21 @@ pip install streamlit  # for dataset cleaner UI
 ### Training
 
 ```bash
-# Train fusion model
-python scripts/train_fusion.py --mode train --epochs 50 --device cuda
+# Train fusion model (full modalities)
+python scripts/train_fusion.py --mode train \
+    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --epochs 50 --device cuda
 
-# Test dataset loading
-python scripts/train_fusion.py --mode test
+# Ablation-style training (block one modality)
+python scripts/train_fusion.py --mode train \
+    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --block_modality visual   # or tactile / none
 
-# Evaluate on validation set
+# Evaluate saved checkpoint on a split
 python scripts/train_fusion.py --mode eval \
-    --checkpoint outputs/fusion_model/best_model.pth
+    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --checkpoint outputs/fusion_model_clean/best_model.pth \
+    --eval_split test
 ```
 
 ### Data Collection
