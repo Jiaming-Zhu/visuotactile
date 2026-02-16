@@ -1,0 +1,802 @@
+[
+  {
+    "epoch": 1,
+    "train": {
+      "loss": 4.074337814793442,
+      "mass": 0.32007575757575757,
+      "stiffness": 0.4962121212121212,
+      "material": 0.3560606060606061
+    },
+    "val": {
+      "loss": 3.793744479908663,
+      "mass": 0.35294117647058826,
+      "stiffness": 0.5441176470588235,
+      "material": 0.4117647058823529
+    },
+    "avg_val_acc": 0.4362745098039215
+  },
+  {
+    "epoch": 2,
+    "train": {
+      "loss": 3.0643198201150605,
+      "mass": 0.6875,
+      "stiffness": 0.6666666666666666,
+      "material": 0.6041666666666666
+    },
+    "val": {
+      "loss": 2.2134129019344555,
+      "mass": 0.8088235294117647,
+      "stiffness": 0.75,
+      "material": 0.7941176470588235
+    },
+    "avg_val_acc": 0.7843137254901961
+  },
+  {
+    "epoch": 3,
+    "train": {
+      "loss": 1.7835822340213892,
+      "mass": 0.8238636363636364,
+      "stiffness": 0.9015151515151515,
+      "material": 0.8371212121212122
+    },
+    "val": {
+      "loss": 1.0523482701357674,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 0.9411764705882353
+    },
+    "avg_val_acc": 0.9803921568627452
+  },
+  {
+    "epoch": 4,
+    "train": {
+      "loss": 0.7307984088406418,
+      "mass": 0.9886363636363636,
+      "stiffness": 0.9962121212121212,
+      "material": 0.9356060606060606
+    },
+    "val": {
+      "loss": 0.3481604807517108,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 5,
+    "train": {
+      "loss": 0.2786207634842757,
+      "mass": 0.9981060606060606,
+      "stiffness": 0.9981060606060606,
+      "material": 0.9640151515151515
+    },
+    "val": {
+      "loss": 0.10562921709874097,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 6,
+    "train": {
+      "loss": 0.08392751329776013,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 0.9962121212121212
+    },
+    "val": {
+      "loss": 0.031533828991300916,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 7,
+    "train": {
+      "loss": 0.029726306032953842,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.015557431889807476,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 8,
+    "train": {
+      "loss": 0.016714395729429794,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.009850300519781955,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 9,
+    "train": {
+      "loss": 0.012008534744381905,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0071543699459118,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 10,
+    "train": {
+      "loss": 0.00873298646712845,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.005414685398778494,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 11,
+    "train": {
+      "loss": 0.0076060767962851305,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0043597427361151755,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 12,
+    "train": {
+      "loss": 0.005593907737144918,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.003522346782333711,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 13,
+    "train": {
+      "loss": 0.0048741783918530655,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0029662286397069693,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 14,
+    "train": {
+      "loss": 0.004084688830048297,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0025359983966850184,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 15,
+    "train": {
+      "loss": 0.0035778228828514166,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.002223113798262442,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 16,
+    "train": {
+      "loss": 0.00312058959918266,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0019621962462277975,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 17,
+    "train": {
+      "loss": 0.002641741115825646,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0017570620950530557,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 18,
+    "train": {
+      "loss": 0.002566488392679303,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0015779668876134297,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 19,
+    "train": {
+      "loss": 0.002286373881030489,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0014386883156154962,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 20,
+    "train": {
+      "loss": 0.002156621698910991,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0013043570181574015,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 21,
+    "train": {
+      "loss": 0.00188667222391814,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.001206459176233586,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 22,
+    "train": {
+      "loss": 0.0017602825995929766,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.001118183629039456,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 23,
+    "train": {
+      "loss": 0.0016227509600646567,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.001042291076908655,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 24,
+    "train": {
+      "loss": 0.0015557374395994525,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0009785796008894548,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 25,
+    "train": {
+      "loss": 0.0015189138022392538,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.000932640245403437,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 26,
+    "train": {
+      "loss": 0.0014226796832217863,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0008724269607816549,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 27,
+    "train": {
+      "loss": 0.0012979781992423038,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0008275759789873572,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 28,
+    "train": {
+      "loss": 0.00121578463938821,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0007845154237549971,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 29,
+    "train": {
+      "loss": 0.0012373575256347206,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0007510007126256824,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 30,
+    "train": {
+      "loss": 0.001184573183612277,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0007237471153904848,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 31,
+    "train": {
+      "loss": 0.001098335140285957,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0006940395242589362,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 32,
+    "train": {
+      "loss": 0.0010758351312357593,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0006714866784236886,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 33,
+    "train": {
+      "loss": 0.0011961969606945236,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0006805947974926847,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 34,
+    "train": {
+      "loss": 0.0011320752920724,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0006659030366469832,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 35,
+    "train": {
+      "loss": 0.0010580362480444212,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.00062819299123743,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 36,
+    "train": {
+      "loss": 0.0011507761682327273,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0007299266495358418,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 37,
+    "train": {
+      "loss": 0.001025029943169405,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0006475887631120928,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 38,
+    "train": {
+      "loss": 0.0009620779151604934,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005993312019306948,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 39,
+    "train": {
+      "loss": 0.0009069740595860463,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005909765057046624,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 40,
+    "train": {
+      "loss": 0.0009112184987205899,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005826890256310649,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 41,
+    "train": {
+      "loss": 0.0009441345252773979,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005724139080163749,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 42,
+    "train": {
+      "loss": 0.0008705794850053886,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005629357765428722,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 43,
+    "train": {
+      "loss": 0.0008744083196771416,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005633580868187197,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 44,
+    "train": {
+      "loss": 0.0009064773595045236,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005527107825721888,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 45,
+    "train": {
+      "loss": 0.0008963787324980578,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005612822098876623,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 46,
+    "train": {
+      "loss": 0.0009228653119256099,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005554806249325766,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 47,
+    "train": {
+      "loss": 0.0008438982926732438,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.000549221082645304,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 48,
+    "train": {
+      "loss": 0.0008415268137909924,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005486367975690347,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 49,
+    "train": {
+      "loss": 0.0008729543769732118,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005566995310158853,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  },
+  {
+    "epoch": 50,
+    "train": {
+      "loss": 0.0009124243868317342,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "val": {
+      "loss": 0.0005537689259440146,
+      "mass": 1.0,
+      "stiffness": 1.0,
+      "material": 1.0
+    },
+    "avg_val_acc": 1.0
+  }
+]

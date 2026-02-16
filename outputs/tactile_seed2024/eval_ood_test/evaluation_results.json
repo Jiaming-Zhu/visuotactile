@@ -1,0 +1,143 @@
+{
+  "split": "ood_test",
+  "checkpoint": "/home/martina/Y3_Project/visuotactile/outputs/tactile_seed2024/best_model.pth",
+  "checkpoint_epoch": 34,
+  "num_samples": 120,
+  "loss": 2.8872707983478905,
+  "mass": 0.8166666666666667,
+  "stiffness": 0.8166666666666667,
+  "material": 0.8166666666666667,
+  "summary": {
+    "average_accuracy": 0.8166666666666668,
+    "average_macro_f1": 0.676520801850257,
+    "average_weighted_f1": 0.812863240224674
+  },
+  "tasks": {
+    "mass": {
+      "accuracy": 0.8166666666666667,
+      "macro": {
+        "precision": 0.8942307692307692,
+        "recall": 0.8166666666666667,
+        "f1": 0.7881899871630296
+      },
+      "weighted": {
+        "precision": 0.8942307692307693,
+        "recall": 0.8166666666666667,
+        "f1": 0.7881899871630296
+      },
+      "per_class": {
+        "very_low": {
+          "precision": 0.5769230769230769,
+          "recall": 1.0,
+          "f1": 0.7317073170731707,
+          "support": 30
+        },
+        "low": {
+          "precision": 1.0,
+          "recall": 0.26666666666666666,
+          "f1": 0.42105263157894735,
+          "support": 30
+        },
+        "medium": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        }
+      },
+      "classification_report": "              precision    recall  f1-score   support\n\n    very_low     0.5769    1.0000    0.7317        30\n         low     1.0000    0.2667    0.4211        30\n      medium     1.0000    1.0000    1.0000        30\n        high     1.0000    1.0000    1.0000        30\n\n    accuracy                         0.8167       120\n   macro avg     0.8942    0.8167    0.7882       120\nweighted avg     0.8942    0.8167    0.7882       120\n"
+    },
+    "stiffness": {
+      "accuracy": 0.8166666666666667,
+      "macro": {
+        "precision": 0.75,
+        "recall": 0.5666666666666667,
+        "f1": 0.6052631578947368
+      },
+      "weighted": {
+        "precision": 1.0,
+        "recall": 0.8166666666666667,
+        "f1": 0.8552631578947368
+      },
+      "per_class": {
+        "very_soft": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "soft": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        },
+        "medium": {
+          "precision": 1.0,
+          "recall": 0.26666666666666666,
+          "f1": 0.42105263157894735,
+          "support": 30
+        },
+        "rigid": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 60
+        }
+      },
+      "classification_report": "              precision    recall  f1-score   support\n\n   very_soft     1.0000    1.0000    1.0000        30\n        soft     0.0000    0.0000    0.0000         0\n      medium     1.0000    0.2667    0.4211        30\n       rigid     1.0000    1.0000    1.0000        60\n\n    accuracy                         0.8167       120\n   macro avg     0.7500    0.5667    0.6053       120\nweighted avg     1.0000    0.8167    0.8553       120\n"
+    },
+    "material": {
+      "accuracy": 0.8166666666666667,
+      "macro": {
+        "precision": 0.7224489795918367,
+        "recall": 0.6533333333333333,
+        "f1": 0.6361092604930046
+      },
+      "weighted": {
+        "precision": 0.903061224489796,
+        "recall": 0.8166666666666667,
+        "f1": 0.795136575616256
+      },
+      "per_class": {
+        "sponge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "foam": {
+          "precision": 1.0,
+          "recall": 0.26666666666666666,
+          "f1": 0.42105263157894735,
+          "support": 30
+        },
+        "wood": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "hollow_container": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        },
+        "filled_container": {
+          "precision": 0.6122448979591837,
+          "recall": 1.0,
+          "f1": 0.759493670886076,
+          "support": 30
+        }
+      },
+      "classification_report": "                  precision    recall  f1-score   support\n\n          sponge     1.0000    1.0000    1.0000        30\n            foam     1.0000    0.2667    0.4211        30\n            wood     1.0000    1.0000    1.0000        30\nhollow_container     0.0000    0.0000    0.0000         0\nfilled_container     0.6122    1.0000    0.7595        30\n\n        accuracy                         0.8167       120\n       macro avg     0.7224    0.6533    0.6361       120\n    weighted avg     0.9031    0.8167    0.7951       120\n"
+    }
+  }
+}
