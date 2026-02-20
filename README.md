@@ -1,55 +1,71 @@
-# Visuotactile Fusion for Robotic Object Property Estimation
+# 🤖 Visuotactile Fusion for Robotic Object Property Estimation
+
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-ee4c2c.svg)
+![Robotics](https://img.shields.io/badge/Robotics-Visuotactile-00a896.svg)
 
 A multi-modal deep learning framework that combines **visual** and **tactile** sensing for estimating physical properties of grasped objects using a low-cost robotic manipulator.
 
-## Overview
+---
 
-This project implements a **ResNet-Transformer fusion architecture** that predicts three physical properties from a single grasp interaction:
+## 📖 Overview
+
+This project implements a **ResNet-Transformer fusion architecture** that predicts three physical properties from a single robotic grasp interaction. Instead of using expensive tactile sensors (like GelSight), it extracts implicit proprioceptive tactile signals directly from the low-cost servo motors' feedback.
 
 | Property | Classes | Description |
 |----------|---------|-------------|
-| **Mass** | 4 | very_low, low, medium, high |
-| **Stiffness** | 4 | very_soft, soft, medium, rigid |
-| **Material** | 5 | sponge, foam, wood, hollow_container, filled_container |
+| **Mass** | 4 | `very_low`, `low`, `medium`, `high` |
+| **Stiffness** | 4 | `very_soft`, `soft`, `medium`, `rigid` |
+| **Material** | 5 | `sponge`, `foam`, `wood`, `hollow_container`, `filled_container` |
 
-### Key Features
+### ✨ Key Features
 
-- **Visual-Tactile Fusion**: Combines RGB images with proprioceptive signals (motor current, position, load, velocity)
-- **Low-Cost Tactile Sensing**: Uses servo motor feedback as implicit tactile signals — no expensive tactile sensors required
-- **Cross-Modal Conflict Handling**: Designed to overcome visual "simplicity bias" through tactile grounding
+- **Visual-Tactile Fusion**: Combines static RGB images (pre-grasp) with dynamic time-series proprioceptive signals (motor current, position, load, velocity during grasp).
+- **Low-Cost Tactile Sensing**: Uses servo motor feedback as implicit tactile signals—no expensive tactile sensors required.
+- **Robust OOD Generalization**: Demonstrates strong zero-shot generalization to unseen objects, leveraging tactile grounding to overcome visual "simplicity bias".
 
-## Architecture
+---
+
+## 🧠 Architecture
 
 ![Fusion Model Architecture](assets/fusionModel.png)
 
-*The fusion model combines visual features (ResNet18) and tactile features (1D-CNN) through a Transformer encoder, outputting predictions for mass, stiffness, and material.*
+*The fusion model combines visual features (ResNet18) and tactile features (1D-CNN) through a Transformer Encoder. The `[CLS]` token is then passed through 3 independent MLP heads to output predictions for mass, stiffness, and material.*
 
-## Project Structure
+---
 
-```
-visuotactile/
-├── scripts/                    # Training & utility scripts
-│   ├── train_fusion.py         # Main training/evaluation entrypoint
-│   ├── clean_dataset_ui.py     # Streamlit dataset cleaner
-│   ├── find_defaultSetting.py  # Runtime/default setting helper
-│   ├── visualize_rrc.py        # Plot helper
-│   └── visualize_plaintext_dataset.py
-│
-├── outputs/                    # Model checkpoints & results
-│   ├── fusion_model/           # Fusion model weights
-│   ├── tactile_transformer/    # Tactile-only baseline
-│   └── visual_resnet/          # Visual-only baseline
-│
-├── collect_custom_multimodal.py    # Data collection script
-├── interactive_control_oop.py      # Robot teleoperation
-├── replay_position_logs.py         # Motion replay utility
-│
-├── assets/                     # SO-101 robot CAD files
-├── docs/                       # Documentation
-└── so101_new_calib.urdf        # Robot URDF model
-```
+## 📊 Experimental Results & Key Findings
 
-## Quick Start
+Our extensive evaluation across multiple random seeds (n=5) revealed several critical insights regarding multimodal learning for physical property estimation.
+
+### 1. Superior Out-Of-Distribution (OOD) Generalization
+The Fusion model vastly outperforms single-modality baselines when encountering **novel, unseen objects**:
+
+| Model | Test Acc (In-Distribution) | OOD Test Acc (Novel Objects) |
+|---|:---:|:---:|
+| **Fusion (Visual + Tactile)** | **99.51%** | **89.94%** |
+| Tactile Only | 95.69% | 79.28% |
+| Vision Only | 95.29% | 20.50% |
+
+### 2. Synergistic Complementarity (1 + 1 > 2)
+While the Vision-only model completely collapses on OOD data (20.50%, roughly random chance), combining it with Tactile data (79.28%) yields a Fusion performance of **89.94%**. Vision features, though useless independently for novel objects, provide crucial disambiguation cues that resolve tactile ambiguities through cross-modal attention.
+
+### 3. The "Simplicity Bias" & Attention Masking
+We discovered that Vision suffers from severe *simplicity bias*—it memorizes object appearances (colors/textures) rather than physics. 
+Counterintuitively, during inference on OOD data, **masking out the visual tokens** in the Transformer attention mechanism actually **improves** the Fusion model's accuracy from `89.94%` to `96.44%`. This indicates that for unseen objects, visual features can act as deceptive noise, and the model benefits from falling back entirely on tactile grounding.
+
+---
+
+## 🛠️ Hardware Setup
+
+- **Robot**: SO-101 6-DOF Manipulator
+- **Actuators**: Feetech STS3215 servo motors (providing 24-dim tactile feedback)
+- **Camera**: USB webcam (640×480)
+- **Controller**: Raspberry Pi / Linux PC
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -61,52 +77,56 @@ pip install scikit-learn seaborn matplotlib
 pip install streamlit  # for dataset cleaner UI
 ```
 
-### Training
+### Training & Evaluation
 
 ```bash
 # Train fusion model (full modalities)
 python scripts/train_fusion.py --mode train \
-    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --data_root /path/to/Plaintextdataset \
     --epochs 50 --device cuda
 
 # Ablation-style training (block one modality)
 python scripts/train_fusion.py --mode train \
-    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --data_root /path/to/Plaintextdataset \
     --block_modality visual   # or tactile / none
 
 # Evaluate saved checkpoint on a split
 python scripts/train_fusion.py --mode eval \
-    --data_root /home/martina/Y3_Project/Plaintextdataset \
+    --data_root /path/to/Plaintextdataset \
     --checkpoint outputs/fusion_model_clean/best_model.pth \
     --eval_split test
 ```
 
-### Data Collection
+### Inference-Time Attention Ablation
+```bash
+# Run attention masking ablation on fusion checkpoints
+python scripts/infer_fusion_multiseed_ablation.py
+```
+
+### Data Collection & Cleaning
 
 ```bash
-# Collect multimodal grasping data
+# Collect multimodal grasping data using the real robot
 python collect_custom_multimodal.py \
     --log-file outputs/logs/position_logs.json \
     --dataset-root ../Plaintextdataset/train
-```
 
-### Dataset Cleaning
-
-```bash
 # Launch Streamlit UI for dataset inspection
 streamlit run scripts/clean_dataset_ui.py
 ```
 
-## Dataset Format
+---
 
-```
+## 📂 Dataset Format
+
+```text
 Plaintextdataset/
 ├── train/
 │   ├── physical_properties.json    # Labels for training objects
 │   ├── WoodBlock_Native/
 │   │   ├── episode_xxx/
 │   │   │   ├── visual_anchor.jpg   # RGB image before grasp
-│   │   │   ├── tactile_data.pkl    # Time-series sensor data
+│   │   │   ├── tactile_data.pkl    # Time-series sensor data (Pickle)
 │   │   │   └── metadata.json       # Episode metadata
 │   │   └── ...
 │   └── ...
@@ -115,35 +135,42 @@ Plaintextdataset/
     └── ...
 ```
 
-### Tactile Data Channels (24-dim)
+### 📡 Tactile Data Channels (24-dim)
 
-| Channel | Description |
-|---------|-------------|
-| 0-5 | Joint positions (6 DOF) |
-| 6-11 | Joint loads |
-| 12-17 | Joint currents |
-| 18-23 | Joint velocities |
+The implicit tactile feedback is collected as a 24-dimensional time series from the 6 joints:
 
-## Results
+| Channel Index | Feedback Type |
+|---------------|---------------|
+| `0 - 5` | Joint Positions (6 DOF) |
+| `6 - 11` | Joint Loads |
+| `12 - 17` | Joint Currents |
+| `18 - 23` | Joint Velocities |
 
-### Fusion Model Performance (Validation Set)
+---
 
-| Task | Accuracy | Weighted F1 |
-|------|----------|-------------|
-| Mass | 83.33% | 81.25% |
-| Stiffness | 83.33% | 80.36% |
-| Material | 75.83% | 68.47% |
-| **Average** | **80.83%** | **76.69%** |
+## 🗂️ Project Structure
 
-## Hardware
+```text
+visuotactile/
+├── scripts/                    # Training & utility scripts
+│   ├── train_fusion.py         # Main training/evaluation entrypoint
+│   ├── train_vision.py         # Vision-only baseline
+│   ├── train_tactile.py        # Tactile-only baseline
+│   ├── infer_fusion_multiseed_ablation.py # Attention masking ablation
+│   ├── clean_dataset_ui.py     # Streamlit dataset cleaner
+│   ├── run_multi_seed.sh       # Multi-seed training automation
+│   └── ...
+├── outputs/                    # Model checkpoints & results
+├── collect_custom_multimodal.py# Robot teleoperation & Data collection script
+├── interactive_control_oop.py  # Robot control interface
+├── replay_position_logs.py     # Motion replay utility
+├── assets/                     # SO-101 robot CAD & architecture diagrams
+├── docs/                       # Documentation
+└── so101_new_calib.urdf        # Robot URDF model
+```
 
-- **Robot**: SO-101 6-DOF Manipulator
-- **Actuators**: Feetech STS3215 servo motors
-- **Camera**: USB webcam (640×480)
-- **Controller**: Raspberry Pi / Linux PC
+---
 
-
-
-## License
+## 📄 License
 
 This project is for academic research purposes.
