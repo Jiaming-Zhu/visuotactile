@@ -3,3 +3,23 @@ __pycache__/
 .cache/
 .idea/
 .vscode/
+
+# Models and Checkpoints
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.h5
+*.hdf5
+*.pb
+*.onnx
+*.bin
+*.model
+*.weights.h5
+
+# Directories commonly containing models and logs
+checkpoints/
+models/
+outputs/
+logs/
+runs/
