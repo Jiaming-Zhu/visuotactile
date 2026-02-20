@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+> **⚠️ AI Agent 必读**: 在处理具体的代码或分析实验结果前，请优先阅读 [PROJECT_CONTEXT_FOR_AGENTS.md](PROJECT_CONTEXT_FOR_AGENTS.md) 以快速掌握该项目的架构设计和核心实验结论（特别是 OOD 泛化性能和模态消融实验的发现）。
+
 ## Project Structure & Module Organization
 Core code is Python-first and split by workflow:
 - `scripts/`: training, evaluation, visualization, and dataset tools (for example `train_fusion.py`, `clean_dataset_ui.py`, `visualize_plaintext_dataset.py`).
