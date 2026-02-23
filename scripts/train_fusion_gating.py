@@ -3,6 +3,7 @@ import json
 import os
 import pickle
 import random
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -276,11 +277,14 @@ class RoboticGraspDataset(Dataset):
         }
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: int, device_arg: str = "") -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    # Only touch CUDA RNG when CUDA is explicitly requested and available.
+    # This avoids noisy warnings / slowdowns in CPU-only environments.
+    if (device_arg or "").strip().lower().startswith("cuda") and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def resolve_device(device_arg: str) -> torch.device:
@@ -324,7 +328,9 @@ def compute_metrics(
     tactile_drop_prob=0.0,
     block_mode="none",
     lambda_reg=0.1,
-    reg_type="polarization"
+    reg_type="polarization",
+    gate_target_mean: float = 0.5,
+    gate_entropy_eps: float = 1e-6,
 ):
     if train_mode:
         model.train()
@@ -363,6 +369,19 @@ def compute_metrics(
                 reg_loss = (g * (1.0 - g)).mean()
             elif reg_type == "sparsity":
                 reg_loss = g.mean()
+            elif reg_type == "mean":
+                reg_loss = (g.mean() - gate_target_mean).pow(2)
+            elif reg_type == "center":
+                reg_loss = (g - 0.5).pow(2).mean()
+            elif reg_type == "entropy":
+                # Encourage smooth (non-saturated) gates by maximizing Bernoulli entropy.
+                # Minimize (log 2 - H(g)), which is 0 at maximum entropy (g=0.5) and >0 when g -> 0/1.
+                g_clamped = torch.clamp(g, gate_entropy_eps, 1.0 - gate_entropy_eps)
+                entropy = -(
+                    g_clamped * torch.log(g_clamped)
+                    + (1.0 - g_clamped) * torch.log(1.0 - g_clamped)
+                ).mean()
+                reg_loss = (math.log(2.0) - entropy)
             else:
                 reg_loss = torch.tensor(0.0, device=device)
                 
@@ -383,6 +402,17 @@ def compute_metrics(
                     reg_loss = (g * (1.0 - g)).mean()
                 elif reg_type == "sparsity":
                     reg_loss = g.mean()
+                elif reg_type == "mean":
+                    reg_loss = (g.mean() - gate_target_mean).pow(2)
+                elif reg_type == "center":
+                    reg_loss = (g - 0.5).pow(2).mean()
+                elif reg_type == "entropy":
+                    g_clamped = torch.clamp(g, gate_entropy_eps, 1.0 - gate_entropy_eps)
+                    entropy = -(
+                        g_clamped * torch.log(g_clamped)
+                        + (1.0 - g_clamped) * torch.log(1.0 - g_clamped)
+                    ).mean()
+                    reg_loss = (math.log(2.0) - entropy)
                 else:
                     reg_loss = torch.tensor(0.0, device=device)
                     
@@ -648,12 +678,15 @@ def train(args: argparse.Namespace) -> None:
 
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    set_seed(args.seed)
+    set_seed(args.seed, args.device)
 
     device = resolve_device(args.device)
     print(f"device: {device}")
     print(f"block_modality: {args.block_modality}")
-    print(f"gating regularization: {args.reg_type} with weight {args.lambda_reg}")
+    print(
+        f"gating regularization: {args.reg_type} with weight {args.lambda_reg} "
+        f"(warmup={args.gate_reg_warmup_epochs}, ramp={args.gate_reg_ramp_epochs}, target_mean={args.gate_target_mean})"
+    )
 
     train_loader = build_loader(train_dir, args.batch_size, args.max_tactile_len, args.num_workers, shuffle=True)
     val_loader = build_loader(val_dir, args.batch_size, args.max_tactile_len, args.num_workers, shuffle=False)
@@ -685,6 +718,7 @@ def train(args: argparse.Namespace) -> None:
     history = []
     best_val_acc = -1.0
     best_epoch = -1
+    early_stop_streak = 0
     live_plotter = None
     if args.live_plot:
         try:
@@ -695,6 +729,17 @@ def train(args: argparse.Namespace) -> None:
             live_plotter = None
 
     for epoch in range(1, args.epochs + 1):
+        # Regularization schedule to reduce early training instability.
+        if args.reg_type == "none":
+            lambda_reg_eff = 0.0
+        elif epoch <= args.gate_reg_warmup_epochs:
+            lambda_reg_eff = 0.0
+        elif args.gate_reg_ramp_epochs > 0:
+            progress = (epoch - args.gate_reg_warmup_epochs) / max(1, args.gate_reg_ramp_epochs)
+            lambda_reg_eff = float(args.lambda_reg) * float(min(1.0, max(0.0, progress)))
+        else:
+            lambda_reg_eff = float(args.lambda_reg)
+
         train_metrics = compute_metrics(
             model=model,
             loader=train_loader,
@@ -705,8 +750,10 @@ def train(args: argparse.Namespace) -> None:
             visual_drop_prob=args.visual_drop_prob,
             tactile_drop_prob=args.tactile_drop_prob,
             block_mode=args.block_modality,
-            lambda_reg=args.lambda_reg,
+            lambda_reg=lambda_reg_eff,
             reg_type=args.reg_type,
+            gate_target_mean=args.gate_target_mean,
+            gate_entropy_eps=args.gate_entropy_eps,
         )
         val_metrics = compute_metrics(
             model=model,
@@ -715,8 +762,10 @@ def train(args: argparse.Namespace) -> None:
             device=device,
             train_mode=False,
             block_mode=args.block_modality,
-            lambda_reg=args.lambda_reg,
+            lambda_reg=lambda_reg_eff,
             reg_type=args.reg_type,
+            gate_target_mean=args.gate_target_mean,
+            gate_entropy_eps=args.gate_entropy_eps,
         )
         scheduler.step()
 
@@ -744,6 +793,19 @@ def train(args: argparse.Namespace) -> None:
                 "val_metrics": val_metrics,
             }
             torch.save(ckpt, save_dir / "best_model.pth")
+
+        # Optional early stop once validation accuracy saturates.
+        if args.early_stop_patience > 0:
+            if avg_val >= (args.early_stop_acc - 1e-12):
+                early_stop_streak += 1
+            else:
+                early_stop_streak = 0
+            if epoch >= args.early_stop_min_epoch and early_stop_streak >= args.early_stop_patience:
+                print(
+                    f"early stop: avg_val_acc={avg_val:.2%} for {early_stop_streak} epochs "
+                    f"(min_epoch={args.early_stop_min_epoch}, patience={args.early_stop_patience})"
+                )
+                break
 
         if epoch % args.save_every == 0:
             torch.save(
@@ -808,7 +870,10 @@ def eval_split(args: argparse.Namespace, split_name: str, checkpoint_path: Optio
     criterion = nn.CrossEntropyLoss()
     base_metrics = compute_metrics(
         model, loader, criterion, device, train_mode=False, block_mode=args.block_modality,
-        lambda_reg=args.lambda_reg, reg_type=args.reg_type
+        lambda_reg=args.lambda_reg,
+        reg_type=args.reg_type,
+        gate_target_mean=args.gate_target_mean,
+        gate_entropy_eps=args.gate_entropy_eps,
     )
 
     all_preds = {"mass": [], "stiffness": [], "material": []}
@@ -955,6 +1020,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unfreeze_visual", dest="freeze_visual", action="store_false")
     parser.add_argument("--visual_drop_prob", type=float, default=0.0)
     parser.add_argument("--tactile_drop_prob", type=float, default=0.0)
+    parser.add_argument("--early_stop_patience", type=int, default=0, help="Disable if 0; stop if val avg acc reaches threshold for N epochs")
+    parser.add_argument("--early_stop_acc", type=float, default=1.0, help="Validation avg acc threshold for early stop")
+    parser.add_argument("--early_stop_min_epoch", type=int, default=0, help="Do not early stop before this epoch")
 
     # --- Gating specific arguments ---
     parser.add_argument("--lambda_reg", type=float, default=0.1, help="Weight for gating regularization loss")
@@ -962,8 +1030,22 @@ def parse_args() -> argparse.Namespace:
         "--reg_type", 
         type=str, 
         default="polarization", 
-        choices=["polarization", "sparsity", "none"],
+        choices=["polarization", "sparsity", "mean", "center", "entropy", "none"],
         help="Type of regularization on the gate score"
+    )
+    parser.add_argument("--gate_target_mean", type=float, default=0.5, help="Target mean for reg_type=mean")
+    parser.add_argument("--gate_entropy_eps", type=float, default=1e-6, help="Clamp epsilon for entropy regularization")
+    parser.add_argument(
+        "--gate_reg_warmup_epochs",
+        type=int,
+        default=0,
+        help="Epochs to disable gate regularization (lambda_reg_eff=0) at the start",
+    )
+    parser.add_argument(
+        "--gate_reg_ramp_epochs",
+        type=int,
+        default=0,
+        help="Linearly ramp gate regularization from 0 to lambda_reg after warmup (0 disables ramp)",
     )
 
     return parser.parse_args()

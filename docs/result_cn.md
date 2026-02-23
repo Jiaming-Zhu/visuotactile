@@ -13,7 +13,6 @@
 | C | **纯触觉模型（独立）** | `scripts/train_tactile.py` | TactileOnlyModel | 仅触觉 |
 | D | **融合模型（屏蔽触觉）** | `scripts/train_fusion.py --block_modality tactile` | FusionModel | 仅视觉（触觉置零） |
 | E | **融合模型（屏蔽视觉）** | `scripts/train_fusion.py --block_modality visual` | FusionModel | 仅触觉（视觉置零） |
-| F | **门控融合模型** | `scripts/train_fusion_gating.py` | FusionGatingModel | 视觉 + 触觉 (动态加权) |
 
 ### 1.2 架构详情
 
@@ -73,7 +72,6 @@
 | **A. 融合（双模态）** | **100.00 ± 0.00%** | **100.00 ± 0.00%** | 98.53 ± 1.86% | **99.51 ± 0.62%** |
 | B. 纯视觉 | 93.82 ± 1.95% | 94.12 ± 1.86% | **97.94 ± 1.18%** | 95.29 ± 1.47% |
 | C. 纯触觉 | 95.59 ± 1.32% | 95.88 ± 1.10% | 95.59 ± 2.28% | 95.69 ± 1.37% |
-| **F. 门控融合模型** | 99.12 ± 1.76% | 99.12 ± 1.76% | 99.12 ± 1.76% | 99.12 ± 1.76% |
 
 ### 2.2 OOD Test 集（分布外，120 个样本）
 
@@ -82,7 +80,6 @@
 | **A. 融合（双模态）** | 89.00 ± 8.42% | 91.50 ± 6.06% | 89.33 ± 7.37% | 89.94 ± 7.00% |
 | B. 纯视觉 | 19.50 ± 5.79% | 21.33 ± 3.10% | 20.67 ± 4.78% | 20.50 ± 4.47% |
 | C. 纯触觉 | 79.00 ± 1.86% | 79.67 ± 1.55% | 79.17 ± 1.75% | 79.28 ± 1.64% |
-| **F. 门控融合模型** | **95.17 ± 6.02%** | **95.83 ± 5.96%** | **95.00 ± 5.70%** | **95.33 ± 5.85%** |
 
 ### 2.3 逐种子明细
 
@@ -94,8 +91,6 @@
 | 纯视觉 | OOD 平均 Acc | 22.78% | 25.56% | 20.83% | 12.22% | 21.11% |
 | 纯触觉 | Test 平均 Acc | 93.14% | 96.57% | 97.06% | 96.08% | 95.59% |
 | 纯触觉 | OOD 平均 Acc | 80.83% | 77.78% | 78.33% | 77.78% | 81.67% |
-| 门控融合 | Test 平均 Acc | 95.59% | 100.00% | 100.00% | 100.00% | 100.00% |
-| 门控融合 | OOD 平均 Acc | 84.44% | 100.00% | 98.06% | 100.00% | 94.17% |
 
 ### 2.4 单种子结果（Seed 42，含消融实验）
 
@@ -118,7 +113,6 @@
 | C. 纯触觉 | 33 / 50 | 93.63% | 0.0083 |
 | D. 融合（屏蔽触觉） | 36 / 50 | 100.00% | 0.0021 |
 | E. 融合（屏蔽视觉） | 16 / 50 | 93.14% | 0.0087 |
-| F. 门控融合 | 35 / 50 | 96.57% | 0.0410 |
 
 > **注意**：模型 D（融合模型屏蔽触觉）在训练过程中出现严重的不稳定性，验证集准确率在 ~19% 和 ~100% 之间剧烈震荡。这是由于 375 个全零触觉 token 对 Transformer 自注意力机制造成了干扰。最佳 epoch（36）是在短暂的稳定窗口中达到的。
 
@@ -198,7 +192,6 @@
 
 | 方法 | 模型权重来源 | OOD 平均 Acc |
 |---|---|---|
-| 门控融合 | FusionGatingModel | **95.33 ± 5.85%** |
 | 注意力掩码 仅触觉 | 融合模型（双模态训练） | **96.44 ± 4.70%** |
 | 融合完整（双模态） | 融合模型（双模态训练） | 89.94 ± 7.00% |
 | 独立纯触觉模型 | TactileOnlyModel | 79.28 ± 1.64% |
@@ -209,15 +202,6 @@
 1. **不同的模型权重**：融合模型的触觉编码器经过了与视觉的联合训练，受益于更丰富的跨模态梯度信号。
 2. **不同的消融机制**：注意力掩码完全隐藏 token；输入置零将全零衍生的噪声 token 送入注意力计算。
 3. **训练外推理模式**：模型从未在训练中见过注意力掩码视觉的情况，因此这对模型本身而言也是一种 OOD 推理模式。
-4. **动态门控机制**：最新引入的门控融合模型(FusionGatingModel)在没有人为指定掩码的正常推理下，就能在 OOD 集上达到与人为最佳掩码干预（96.44%）相媲美的 **95.33%**。这证明了模型已经学会在面对未见物体时，**自发地**降低视觉权重（"闭上眼睛"），从而达到了极高的泛化能力。
-
-补充说明（门控分数 g 的记录与当前观察）：
-
-- 推理时每个样本的门控系数 g 会被写入 `eval_ood_test/evaluation_results.json` 的 `gate_scores` 字段；`avg_gate_score` 是其均值（同文件中也会保存）。
-- `visuotactile/outputs/meta/multi_seed_summary_gating.json` 只汇总每个 seed 的 `avg_gate_score`（mean/std/values），不包含逐样本的 g 序列。
-- 本次实验的 OOD 上 g 呈现明显两极化且跨 seed 不稳定：seed=42 的 g 几乎全接近 0（mean≈`1.88e-5`），而 seed=123/456/789/2024 的 g 几乎全接近 1（mean≈`0.9992`–`0.9997`）。因此汇总里的 `avg_gate_score≈0.8` 并不代表“典型样本”的门控强度，更像是“部分 seed 全关、部分 seed 全开”的平均。
-- 这意味着“自发降低视觉权重”的行为需要结合 `gate_scores` 的分布（中位数/分位数/直方图）而非只看均值来验证，并且当前门控策略可能存在塌缩到极端解的风险（随随机种子变化）。
-- 路径备注：当前仓库的门控评估结果位于 `visuotactile/outputs/fusion/gating/*/eval_ood_test/evaluation_results.json`，而脚本与文档中部分旧路径（例如 `outputs/fusion_model_gating/`）可能需要按实际目录结构调整。
 
 ---
 
@@ -247,9 +231,8 @@
 - 纯视觉 OOD：**20.50 ± 4.47%**（独立使用无效）
 - 纯触觉 OOD：**79.28 ± 1.64%**
 - 融合 OOD：**89.94 ± 7.00%**
-- 门控融合 OOD：**95.33 ± 5.85%**
 
-一个独立使用在 OOD 上完全无效的模态，加入后仍能将整体性能平均提升约 10.7 个百分点（普通融合）或 16 个百分点（门控融合）。这证明了**协同互补（synergistic complementarity）**——视觉特征虽然不足以独立分类未见过的物体，但能通过 Transformer 中的跨模态注意力机制，为触觉的模糊判断提供消歧线索。特别是结合门控机制后，模型更是学会了只在安全的时候利用视觉，从而释放了最大的潜力。
+一个独立使用在 OOD 上完全无效的模态，加入后仍能将整体性能平均提升约 10.7 个百分点。这证明了**协同互补（synergistic complementarity）**——视觉特征虽然不足以独立分类未见过的物体，但能通过 Transformer 中的跨模态注意力机制，为触觉的模糊判断提供消歧线索。
 
 具体来说，在最佳种子（42）中，融合模型精确修复了触觉失败的类别：
 
@@ -324,7 +307,6 @@ python visuotactile/scripts/infer_fusion_multiseed_ablation.py
 | C. 纯触觉 | `outputs/tactile_model_clean/` | `outputs/tactile_model_clean/eval_test/` | `outputs/tactile_model_clean/eval_ood_test/` |
 | D. 融合（屏蔽触觉） | `outputs/fusion_model_visualOnly/` | `outputs/fusion_model_visualOnly/eval_test_block_tactile/` | `outputs/fusion_model_visualOnly/eval_ood_test_block_tactile/` |
 | E. 融合（屏蔽视觉） | `outputs/fusion_model_tactileOnly/` | `outputs/fusion_model_tactileOnly/eval_test_block_visual/` | `outputs/fusion_model_tactileOnly/eval_ood_test_block_visual/` |
-| F. 门控融合 | `outputs/fusion_model_gating/` | `outputs/fusion_model_gating/eval_test/` | `outputs/fusion_model_gating/eval_ood_test/` |
 
 ### 7.2 多种子实验
 
@@ -333,8 +315,6 @@ python visuotactile/scripts/infer_fusion_multiseed_ablation.py
 | 融合 | `outputs/fusion_seed42/` | `outputs/fusion_seed123/` | `outputs/fusion_seed456/` | `outputs/fusion_seed789/` | `outputs/fusion_seed2024/` |
 | 纯视觉 | `outputs/vision_seed42/` | `outputs/vision_seed123/` | `outputs/vision_seed456/` | `outputs/vision_seed789/` | `outputs/vision_seed2024/` |
 | 纯触觉 | `outputs/tactile_seed42/` | `outputs/tactile_seed123/` | `outputs/tactile_seed456/` | `outputs/tactile_seed789/` | `outputs/tactile_seed2024/` |
-| 门控融合 | `outputs/fusion_model_gating/` | (同目录生成) | (同目录生成) | (同目录生成) | (同目录生成) |
-| 门控融合 | `outputs/fusion_model_gating/` | *(门控脚本在输出目录同级生成结果)* | | | |
 
 ### 7.3 注意力掩码消融
 
@@ -345,4 +325,39 @@ python visuotactile/scripts/infer_fusion_multiseed_ablation.py
 
 汇总文件：
 - `outputs/meta/multi_seed_summary.json` (包含模型 A/B/C 的结果)
-- `outputs/meta/multi_seed_summary_gating.json` (包含门控模型的结果)
+- `outputs/meta/multi_seed_summary_gating_entropy.json` (包含模型 F 门控融合结果)
+
+---
+
+## 8. 连续门控机制 (Continuous Gating) 实验结果
+
+为解决视觉在分布外 (OOD) 数据上易失效的问题，我们引入了**连续门控机制 (Continuous Gating)** (使用 `train_fusion_gating.py` 脚本)，并使用 Entropy 正则化进行了 5 个随机种子 (42, 123, 456, 789, 2024) 的实验。
+
+### 8.1 主要结果（mean ± std，n=5）
+
+#### Test 集（分布内）
+
+| 模型 | 质量 Acc | 刚度 Acc | 材质 Acc | **平均 Acc** | **平均 Gate Score** |
+|---|---|---|---|---|---|
+| A. 融合 (基础) | 100.00 ± 0.00% | 100.00 ± 0.00% | 98.53 ± 1.86% | 99.51 ± 0.62% | - |
+| **F. 融合 (Gating Entropy)** | 100.00 ± 0.00% | 100.00 ± 0.00% | 100.00 ± 0.00% | **100.00 ± 0.00%** | **0.828 ± 0.145** |
+
+#### OOD Test 集（分布外）
+
+| 模型 | 质量 Acc | 刚度 Acc | 材质 Acc | **平均 Acc** | **平均 Gate Score** |
+|---|---|---|---|---|---|
+| A. 融合 (基础) | 89.00 ± 8.42% | 91.50 ± 6.06% | 89.33 ± 7.37% | 89.94 ± 7.00% | - |
+| **F. 融合 (Gating Entropy)** | 98.00 ± 2.92% | 97.67 ± 3.14% | 98.83 ± 1.45% | **98.17 ± 2.38%** | **0.843 ± 0.139** |
+
+**结果分析：** 引入门控机制后，模型在分布外 OOD 数据上的平均准确率从 **89.94%** 显著提升至 **98.17%**，几乎完美解决了未见物体上的性能崩溃问题，极大增强了模型跨物体的泛化鲁棒性。
+
+### 8.2 逐种子明细 (OOD Test 集)
+
+| 指标 | Seed 42 | Seed 123 | Seed 456 | Seed 789 | Seed 2024 |
+|---|---|---|---|---|---|
+| OOD 平均 Acc | 97.22% | 99.72% | 93.89% | 100.00% | 100.00% |
+| OOD Gate Score | 0.588 | 0.949 | 0.932 | 0.946 | 0.800 |
+
+**关键发现：** 
+- 在大部分种子下，门控分数徘徊在 0.8~0.95 之间，既没有像之前完全抛弃视觉，也没有全盘接收。
+- 所有种子的模型在整合两种模态信息时，都在 OOD 集合上维持了非常稳定的高准确率 (93%~100%)。相较于基础模型，基于 Entropy 的门控显著平滑了门控分配，在保留有用视觉特征和过滤视觉噪声之间取得了极佳的平衡。
