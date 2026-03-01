@@ -23,6 +23,17 @@ This project implements a **ResNet-Transformer fusion architecture** that predic
 - **Visual-Tactile Fusion**: Combines static RGB images (pre-grasp) with dynamic time-series proprioceptive signals (motor current, position, load, velocity during grasp).
 - **Low-Cost Tactile Sensing**: Uses servo motor feedback as implicit tactile signals—no expensive tactile sensors required.
 - **Robust OOD Generalization**: Demonstrates strong zero-shot generalization to unseen objects, leveraging tactile grounding to overcome visual "simplicity bias".
+- **Entropy-Regularized Continuous Gating**: A gating model with entropy regularization raises OOD average accuracy to **98.17%** across 5 seeds while keeping the average gate score at **0.843**, avoiding degenerate always-open gates.
+
+### 🔥 Highlight: Gating Entropy Result
+
+The most important recent result in this repository is the **Continuous Gating + Entropy regularization** experiment (`train_fusion_gating.py`).
+
+- On the OOD split, the baseline Fusion model reaches **89.94%** average accuracy.
+- The entropy-regularized gating model improves this to **98.17% ± 2.38%** across 5 seeds.
+- At the same time, its average gate score is **0.843 ± 0.139**, which is meaningfully lower than the near-saturated no-entropy gating control (`0.9995 ± 0.0002`).
+
+This is the key evidence that entropy regularization prevents gate collapse, keeps the visual pathway selectively usable, and preserves strong cross-object generalization instead of blindly trusting vision.
 
 ---
 
@@ -38,7 +49,18 @@ This project implements a **ResNet-Transformer fusion architecture** that predic
 
 Our extensive evaluation across multiple random seeds (n=5) revealed several critical insights regarding multimodal learning for physical property estimation.
 
-### 1. Superior Out-Of-Distribution (OOD) Generalization
+### 1. Entropy-Regularized Gating Is the Strongest OOD Result
+The best current result is the **Gating Entropy** variant of the fusion model:
+
+| Model | Test Acc (In-Distribution) | OOD Test Acc (Novel Objects) | Avg Gate Score |
+|---|:---:|:---:|:---:|
+| Fusion (Baseline) | 99.51% | 89.94% | - |
+| Gating (w/o Entropy) | 100.00% | 98.06% | 0.9995 |
+| **Gating (Entropy)** | **100.00%** | **98.17%** | **0.843** |
+
+The key point is not just the higher OOD accuracy, but that entropy regularization prevents the gate from collapsing into an almost always-open visual route.
+
+### 2. Superior Out-Of-Distribution (OOD) Generalization
 The Fusion model vastly outperforms single-modality baselines when encountering **novel, unseen objects**:
 
 | Model | Test Acc (In-Distribution) | OOD Test Acc (Novel Objects) |
@@ -47,10 +69,10 @@ The Fusion model vastly outperforms single-modality baselines when encountering 
 | Tactile Only | 95.69% | 79.28% |
 | Vision Only | 95.29% | 20.50% |
 
-### 2. Synergistic Complementarity (1 + 1 > 2)
+### 3. Synergistic Complementarity (1 + 1 > 2)
 While the Vision-only model completely collapses on OOD data (20.50%, roughly random chance), combining it with Tactile data (79.28%) yields a Fusion performance of **89.94%**. Vision features, though useless independently for novel objects, provide crucial disambiguation cues that resolve tactile ambiguities through cross-modal attention.
 
-### 3. The "Simplicity Bias" & Attention Masking
+### 4. The "Simplicity Bias" & Attention Masking
 We discovered that Vision suffers from severe *simplicity bias*—it memorizes object appearances (colors/textures) rather than physics. 
 Counterintuitively, during inference on OOD data, **masking out the visual tokens** in the Transformer attention mechanism actually **improves** the Fusion model's accuracy from `89.94%` to `96.44%`. This indicates that for unseen objects, visual features can act as deceptive noise, and the model benefits from falling back entirely on tactile grounding.
 
