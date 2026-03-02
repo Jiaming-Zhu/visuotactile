@@ -1,6 +1,6 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import json
 import pickle
 import shutil
@@ -13,14 +13,43 @@ st.set_page_config(page_title="Dataset Cleaner", layout="wide")
 st.sidebar.title("Dataset Configuration")
 
 # --- Dataset Root Selection ---
-base_root = Path("Plaintextdataset")
-# Check if Plaintextdataset exists, otherwise try to find it relative to CWD or fallback
-if not base_root.exists():
-    # Try one level up if current dir is inside learn_PyBullet
-    if Path("../Plaintextdataset").exists():
-        base_root = Path("../Plaintextdataset")
-    elif Path(".").exists():
-        base_root = Path(".")
+import sys
+import os
+
+# Allow specifying root via CLI: streamlit run clean_dataset_ui.py -- --data_root /path/to/dataset
+def get_cli_data_root():
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--data_root" and i + 1 < len(args):
+            return Path(args[i + 1])
+    env_root = os.environ.get("DATASET_ROOT")
+    if env_root:
+        return Path(env_root)
+    return None
+
+cli_root = get_cli_data_root()
+
+if cli_root and cli_root.exists():
+    base_root = cli_root
+else:
+    # Candidate roots to search
+    candidates = [
+        Path("Plaintextdataset"),
+        Path("../Plaintextdataset"),
+        Path("/home/martina/Y3_Project/Plaintextdataset"),
+        Path("/home/martina/Y3_Project/TeleopDataset"),
+        Path("."),
+    ]
+    base_root = next((p for p in candidates if p.exists()), Path("."))
+
+# Allow user to override root in the sidebar
+custom_root_input = st.sidebar.text_input("Dataset Root Path", value=str(base_root.resolve()))
+if custom_root_input:
+    candidate = Path(custom_root_input)
+    if candidate.exists():
+        base_root = candidate
+    else:
+        st.sidebar.warning(f"路径不存在: {custom_root_input}")
 
 # List all directories in base_root
 available_dirs = []
@@ -175,7 +204,7 @@ with col_right:
 st.divider()
 
 # Waveforms
-st.subheader("📈 Sensor Waveforms")
+st.subheader("� Sensor Waveforms")
 
 if tactile:
     timestamps = np.array(tactile.get("timestamps", []))
@@ -243,35 +272,27 @@ if tactile:
             # Optimized data preparation: Slicing numpy arrays directly BEFORE creating DataFrames
             # Calculate step for downsampling
             step = max(1, len(timestamps) // MAX_POINTS)
-            
+
             # Downsample timestamps
             small_timestamps = timestamps[::step]
-            
-            # Helper to extract and downsample data column
+            joint_name_to_idx = {name: idx for idx, name in enumerate(joint_names)}
+
             def get_data_col(name, profile_key, separate_key=None):
-                # If it's the separate gripper key
                 if separate_key and name == "gripper_width (separate)":
-                    raw_data = tactile.get(separate_key, [])
-                    if len(raw_data) == len(timestamps):
+                    raw_data = np.asarray(tactile.get(separate_key, []))
+                    if raw_data.ndim == 1 and len(raw_data) == len(timestamps):
                         return raw_data[::step]
-                    return np.zeros(len(small_timestamps))
-                
-                # Otherwise find index in joint_names
-                if name in joint_names:
-                    idx = joint_names.index(name)
-                    data = tactile.get(profile_key, [])
-                    if len(data) > 0 and len(data) == len(timestamps):
-                        # data is already numpy array thanks to load_tactile optimization
-                        # But it might be 2D (N, joints) or list of lists if load failed to convert
-                        # We ensure it's numpy in load_tactile, but safe check:
-                        if isinstance(data, np.ndarray) and data.ndim == 2:
-                             if idx < data.shape[1]:
-                                 return data[::step, idx]
-                        # Fallback for list of lists (shouldn't happen with optimized load_tactile)
-                        else:
-                            return [data[i][idx] for i in range(0, len(data), step)]
-                            
-                return np.zeros(len(small_timestamps))
+                    return np.zeros(len(small_timestamps), dtype=float)
+
+                idx = joint_name_to_idx.get(name)
+                if idx is None:
+                    return np.zeros(len(small_timestamps), dtype=float)
+
+                data = np.asarray(tactile.get(profile_key, []))
+                if data.ndim == 2 and len(data) == len(timestamps) and idx < data.shape[1]:
+                    return data[::step, idx]
+
+                return np.zeros(len(small_timestamps), dtype=float)
 
             # 1. Position Plot
             st.write("**Position (Angle/Width)**")
@@ -279,7 +300,7 @@ if tactile:
             for name in selected_joints:
                 col_data = get_data_col(name, "joint_position_profile", "gripper_width_profile")
                 pos_df[name] = col_data
-            
+
             st.line_chart(pos_df, x="Time (s)", y=selected_joints, height=300)
 
             col_charts_1, col_charts_2 = st.columns(2)

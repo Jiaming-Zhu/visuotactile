@@ -8,7 +8,7 @@
 set -euo pipefail
 
 DATA_ROOT="/home/martina/Y3_Project/Plaintextdataset"
-OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/fusion/gating"
+OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/fusion/gating2.0"
 SCRIPT_DIR="/home/martina/Y3_Project/visuotactile/scripts"
 SEEDS=(42 123 456 789 2024)
 
@@ -39,7 +39,7 @@ for SEED in "${SEEDS[@]}"; do
     fi
     echo ""
     echo ">>> seed=${SEED} -> ${SAVE_DIR}"
-    python "${SCRIPT_DIR}/train_fusion_gating.py" \
+    python "${SCRIPT_DIR}/train_fusion_gating copy.py" \
         --mode train \
         --seed "$SEED" \
         --device "$DEVICE" \
@@ -53,6 +53,7 @@ for SEED in "${SEEDS[@]}"; do
         --early_stop_acc 1.0 \
         --reg_type "$REG_TYPE" \
         --lambda_reg "$LAMBDA_REG" \
+        --lambda_aux "0.5" \
         --gate_reg_warmup_epochs "$GATE_WARMUP_EPOCHS" \
         --gate_reg_ramp_epochs "$GATE_RAMP_EPOCHS"
     echo "<<< seed=${SEED} done"
@@ -68,8 +69,8 @@ import json
 import numpy as np
 from pathlib import Path
 
-output_base = Path("/home/martina/Y3_Project/visuotactile/outputs/fusion/gating")
-meta_dir = Path("/home/martina/Y3_Project/visuotactile/outputs/meta")
+output_base = Path("/home/martina/Y3_Project/visuotactile/outputs/fusion/gating2.0")
+meta_dir = Path("/home/martina/Y3_Project/visuotactile/outputs/fusion/gating2.0/meta")
 meta_dir.mkdir(parents=True, exist_ok=True)
 
 seeds = [42, 123, 456, 789, 2024]
