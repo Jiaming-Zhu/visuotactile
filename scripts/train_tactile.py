@@ -34,6 +34,9 @@ class TactileOnlyModel(nn.Module):
         dropout: float = 0.1,
         num_layers: int = 4,
         max_tactile_len: int = 3000,
+        mass_classes: int = 4,
+        stiffness_classes: int = 4,
+        material_classes: int = 5,
     ) -> None:
         super().__init__()
         self.fusion_dim = fusion_dim
@@ -72,19 +75,19 @@ class TactileOnlyModel(nn.Module):
             nn.Linear(fusion_dim, 128),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 4),
+            nn.Linear(128, mass_classes),
         )
         self.head_stiffness = nn.Sequential(
             nn.Linear(fusion_dim, 128),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 4),
+            nn.Linear(128, stiffness_classes),
         )
         self.head_material = nn.Sequential(
             nn.Linear(fusion_dim, 128),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 5),
+            nn.Linear(128, material_classes),
         )
 
     def forward(self, tac: torch.Tensor, padding_mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
@@ -570,10 +573,32 @@ def train(args: argparse.Namespace) -> None:
 
     device = resolve_device(args.device)
     print(f"device: {device}")
+    print(
+        f"early stopping: patience={args.early_stop_patience}, "
+        f"min_epoch={args.early_stop_min_epoch}, target_acc={args.early_stop_acc}"
+    )
 
     train_loader = build_loader(train_dir, args.batch_size, args.max_tactile_len, args.num_workers, shuffle=True)
     val_loader = build_loader(val_dir, args.batch_size, args.max_tactile_len, args.num_workers, shuffle=False)
     print(f"train samples: {len(train_loader.dataset)} | val samples: {len(val_loader.dataset)}")
+
+    mass_classes = len(train_loader.dataset.mass_to_idx)
+    stiffness_classes = len(train_loader.dataset.stiffness_to_idx)
+    material_classes = len(train_loader.dataset.material_to_idx)
+    if mass_classes != len(val_loader.dataset.mass_to_idx):
+        raise ValueError("train/ and val/ mass class counts do not match")
+    if stiffness_classes != len(val_loader.dataset.stiffness_to_idx):
+        raise ValueError("train/ and val/ stiffness class counts do not match")
+    if material_classes != len(val_loader.dataset.material_to_idx):
+        raise ValueError("train/ and val/ material class counts do not match")
+
+    args.mass_classes = mass_classes
+    args.stiffness_classes = stiffness_classes
+    args.material_classes = material_classes
+    print(
+        "class counts: "
+        f"mass={mass_classes}, stiffness={stiffness_classes}, material={material_classes}"
+    )
 
     model = TactileOnlyModel(
         fusion_dim=args.fusion_dim,
@@ -581,6 +606,9 @@ def train(args: argparse.Namespace) -> None:
         dropout=args.dropout,
         num_layers=args.num_layers,
         max_tactile_len=args.max_tactile_len,
+        mass_classes=mass_classes,
+        stiffness_classes=stiffness_classes,
+        material_classes=material_classes,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -601,6 +629,7 @@ def train(args: argparse.Namespace) -> None:
     history = []
     best_val_acc = -1.0
     best_epoch = -1
+    early_stop_streak = 0
     live_plotter = None
     if args.live_plot:
         try:
@@ -654,6 +683,18 @@ def train(args: argparse.Namespace) -> None:
             }
             torch.save(ckpt, save_dir / "best_model.pth")
 
+        if args.early_stop_patience > 0:
+            if avg_val >= (args.early_stop_acc - 1e-12):
+                early_stop_streak += 1
+            else:
+                early_stop_streak = 0
+            if epoch >= args.early_stop_min_epoch and early_stop_streak >= args.early_stop_patience:
+                print(
+                    f"early stop: avg_val_acc={avg_val:.2%} for {early_stop_streak} epochs "
+                    f"(min_epoch={args.early_stop_min_epoch}, patience={args.early_stop_patience})"
+                )
+                break
+
         if epoch % args.save_every == 0:
             torch.save(
                 {
@@ -705,14 +746,40 @@ def eval_split(args: argparse.Namespace, split_name: str, checkpoint_path: Optio
 
     checkpoint = _load_checkpoint(ckpt_path, device)
     cfg = checkpoint.get("config", {})
+    ckpt_state = checkpoint["model_state_dict"]
+
+    dataset_mass_classes = len(dataset.mass_to_idx)
+    dataset_stiffness_classes = len(dataset.stiffness_to_idx)
+    dataset_material_classes = len(dataset.material_to_idx)
+    mass_classes = int(cfg.get("mass_classes", ckpt_state["head_mass.3.weight"].shape[0]))
+    stiffness_classes = int(cfg.get("stiffness_classes", ckpt_state["head_stiffness.3.weight"].shape[0]))
+    material_classes = int(cfg.get("material_classes", ckpt_state["head_material.3.weight"].shape[0]))
+
+    if mass_classes != dataset_mass_classes:
+        raise ValueError(
+            f"Checkpoint expects {mass_classes} mass classes, but dataset defines {dataset_mass_classes}. "
+            "Retrain the model after changing mass labels."
+        )
+    if stiffness_classes != dataset_stiffness_classes:
+        raise ValueError(
+            f"Checkpoint expects {stiffness_classes} stiffness classes, but dataset defines {dataset_stiffness_classes}."
+        )
+    if material_classes != dataset_material_classes:
+        raise ValueError(
+            f"Checkpoint expects {material_classes} material classes, but dataset defines {dataset_material_classes}."
+        )
+
     model = TactileOnlyModel(
         fusion_dim=cfg.get("fusion_dim", args.fusion_dim),
         num_heads=cfg.get("num_heads", args.num_heads),
         dropout=cfg.get("dropout", args.dropout),
         num_layers=cfg.get("num_layers", args.num_layers),
         max_tactile_len=cfg.get("max_tactile_len", args.max_tactile_len),
+        mass_classes=mass_classes,
+        stiffness_classes=stiffness_classes,
+        material_classes=material_classes,
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(ckpt_state)
 
     criterion = nn.CrossEntropyLoss()
     base_metrics = compute_metrics(model=model, loader=loader, criterion=criterion, device=device, train_mode=False)
@@ -842,6 +909,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--num_layers", type=int, default=4)
     parser.add_argument("--tactile_drop_prob", type=float, default=0.0)
+    parser.add_argument("--early_stop_patience", type=int, default=0, help="Disable if 0; stop if val avg acc reaches threshold for N epochs")
+    parser.add_argument("--early_stop_acc", type=float, default=1.0, help="Validation avg acc threshold for early stop")
+    parser.add_argument("--early_stop_min_epoch", type=int, default=0, help="Do not early stop before this epoch")
     return parser.parse_args()
 
 
