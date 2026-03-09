@@ -9,7 +9,7 @@
 set -euo pipefail
 
 DATA_ROOT="/home/martina/Y3_Project/Plaintextdataset"
-SCRIPT_DIR="/home/martina/Y3_Project/visuotactile/scripts"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEEDS=(42 123 456 789 2024)
 
 VISION_OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/vision/standard"
@@ -90,89 +90,12 @@ echo "==================================================="
 echo "  Aggregating results..."
 echo "==================================================="
 
-python - <<'PYEOF'
-import json
-import numpy as np
-from pathlib import Path
-
-meta_dir = Path("/home/martina/Y3_Project/visuotactile/outputs/meta")
-meta_dir.mkdir(parents=True, exist_ok=True)
-
-seeds = [42, 123, 456, 789, 2024]
-tasks = ["mass", "stiffness", "material"]
-splits = ["eval_test", "eval_ood_test"]
-
-models = {
-    "vision_standard": {
-        "label": "Vision Only",
-        "base": Path("/home/martina/Y3_Project/visuotactile/outputs/vision/standard"),
-        "prefix": "vision_standard",
-    },
-    "tactile_standard": {
-        "label": "Tactile Only",
-        "base": Path("/home/martina/Y3_Project/visuotactile/outputs/tactile/standard"),
-        "prefix": "tactile_standard",
-    },
-}
-
-summary = {}
-for model_key, cfg in models.items():
-    summary[model_key] = {"label": cfg["label"]}
-    for split in splits:
-        records = {"mass": [], "stiffness": [], "material": [], "loss": [], "avg": []}
-        used_seeds = []
-        for seed in seeds:
-            result_file = cfg["base"] / f"{cfg['prefix']}_seed{seed}" / split / "evaluation_results.json"
-            if not result_file.exists():
-                print(f"  [WARN] Missing: {result_file}")
-                continue
-            result = json.loads(result_file.read_text())
-            for task in tasks:
-                records[task].append(float(result[task]))
-            records["loss"].append(float(result["loss"]))
-            records["avg"].append(float(np.mean([result[t] for t in tasks])))
-            used_seeds.append(seed)
-
-        if not used_seeds:
-            continue
-
-        summary[model_key][split] = {"used_seeds": used_seeds}
-        for key, values in records.items():
-            arr = np.array(values, dtype=float)
-            summary[model_key][split][key] = {
-                "mean": float(np.mean(arr)),
-                "std": float(np.std(arr)),
-                "values": [float(v) for v in arr],
-            }
-
-print("\n" + "=" * 90)
-print("  SINGLE-MODAL MULTI-SEED RESULTS (mean ± std, n<=5)")
-print("=" * 90)
-
-for split in splits:
-    split_label = "Test (In-Distribution)" if split == "eval_test" else "OOD Test (Out-of-Distribution)"
-    print(f"\n{'-' * 90}")
-    print(f"  {split_label}")
-    print(f"{'-' * 90}")
-    for model_key in ["vision_standard", "tactile_standard"]:
-        model_summary = summary.get(model_key, {})
-        if split not in model_summary:
-            print(f"  {model_summary.get('label', model_key)}: no available results")
-            continue
-        s = model_summary[split]
-        print(
-            f"  {model_summary['label']}: "
-            f"Mass={s['mass']['mean']*100:.2f}±{s['mass']['std']*100:.2f}% | "
-            f"Stiffness={s['stiffness']['mean']*100:.2f}±{s['stiffness']['std']*100:.2f}% | "
-            f"Material={s['material']['mean']*100:.2f}±{s['material']['std']*100:.2f}% | "
-            f"Avg={s['avg']['mean']*100:.2f}±{s['avg']['std']*100:.2f}%"
-        )
-        print(f"    seeds: {s['used_seeds']}")
-
-out_path = meta_dir / "multi_seed_summary_single_modal.json"
-out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
-print(f"\nFull results saved to: {out_path}")
-PYEOF
+python "${SCRIPT_DIR}/aggregate_multi_seed_results.py" \
+    --meta_dir "/home/martina/Y3_Project/visuotactile/outputs/meta" \
+    --out_name "multi_seed_summary_single_modal.json" \
+    --title "Single-Modal Multi-Seed Results" \
+    --model "vision_standard:Vision Only:${VISION_OUTPUT_BASE}:vision_standard" \
+    --model "tactile_standard:Tactile Only:${TACTILE_OUTPUT_BASE}:tactile_standard"
 
 echo ""
 echo "Done!"

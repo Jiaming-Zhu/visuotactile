@@ -3,7 +3,7 @@ set -euo pipefail
 
 DATA_ROOT="/home/martina/Y3_Project/Plaintextdataset"
 OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/fusion/gating_old"
-SCRIPT_DIR="/home/martina/Y3_Project/visuotactile/scripts"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEEDS=(42 123 456 789 2024)
 
 DEVICE="${DEVICE:-cuda}"
