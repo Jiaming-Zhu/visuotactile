@@ -441,9 +441,14 @@ OOD 下略低于质量任务，但也接近满分。
 
 ## 12. 附图
 
-- 前缀-准确率多种子曲线：
-  [online_prefix_multiseed_average_accuracy.png](figures/fusion_gating_online_v2/online_prefix_multiseed_average_accuracy.png)
-- 前缀-gate score 多种子曲线：
-  [online_prefix_multiseed_gate_score.png](figures/fusion_gating_online_v2/online_prefix_multiseed_gate_score.png)
-- 准确率-延迟 trade-off：
-  [prefix_accuracy_latency_tradeoff.png](figures/fusion_gating_online_v2/prefix_accuracy_latency_tradeoff.png)
+### 12.1 前缀-准确率多种子曲线
+
+![OOD prefix average accuracy curve](figures/fusion_gating_online_v2/online_prefix_multiseed_average_accuracy.png)
+
+### 12.2 前缀-gate score 多种子曲线
+
+![OOD prefix gate score curve](figures/fusion_gating_online_v2/online_prefix_multiseed_gate_score.png)
+
+### 12.3 准确率-延迟 trade-off
+
+![OOD prefix accuracy versus inference latency](figures/fusion_gating_online_v2/prefix_accuracy_latency_tradeoff.png)

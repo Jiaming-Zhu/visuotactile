@@ -174,6 +174,8 @@
 - 到 `60%` 时几乎完成决策（约 `99.72%`）；
 - 因此它更像一个“中段收敛型”在线预测器，而不是“一触即知”型模型。
 
+![G3 OOD prefix average accuracy curve](figures/fusion_gating_online_v2/online_prefix_multiseed_average_accuracy.png)
+
 ### 5.3 多随机种子结果（mean ± std, n=5）
 
 | Split | 质量 Acc | 刚度 Acc | 材质 Acc | **平均 Acc** | **平均 Gate** |
@@ -187,6 +189,8 @@
 2. 分布内性能几乎满分，且方差极小；
 3. OOD 整体仍然非常强，平均可达 `97.61%`；
 4. 主要波动来自 `stiffness` 任务，而不是质量或材质。
+
+![G3 OOD prefix gate score curve](figures/fusion_gating_online_v2/online_prefix_multiseed_gate_score.png)
 
 ### 5.4 工程意义
 
@@ -222,3 +226,5 @@
 1. **远超 100Hz 的实时红线**：即便在序列最长（Prefix = 1.0，约 352 个触觉 Token）的最恶劣情况下，单次完整的模型前向推理（包含视觉与触觉门控融合）仅需 **2.486 ms**，等效运行频率高达 **402.3 Hz**，比典型机械臂 100 Hz 的控制循环底线快了约 4 倍。
 2. **早期决策极其轻量**：在能够进行可靠早期判断的 `40%` 前缀进度下，单次推理延迟进一步降低至 **2.012 ms**（约 497.0 Hz）。
 3. **架构选择的务实性**：虽然系统没有采用严格的增量式状态缓存（如 KV-Cache 或 RNN），但压测证明，对于该量级的触觉序列长度，标准的 Transformer 配合 Prefix Mask 的重计算开销在现代硬件上可以忽略不计。这使得我们的系统能够在**避免复杂增量架构实现成本**的同时，完美兼顾**极致的高泛化性能**与**超实时的控制延迟要求**。
+
+![G3 prefix accuracy versus inference latency](figures/fusion_gating_online_v2/prefix_accuracy_latency_tradeoff.png)
