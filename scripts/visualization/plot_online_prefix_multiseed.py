@@ -66,6 +66,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hide_seed_lines", dest="show_seed_lines", action="store_false")
     parser.add_argument("--show_mean", action="store_true", default=True)
     parser.add_argument("--hide_mean", dest="show_mean", action="store_false")
+    parser.add_argument("--ymin", type=float, default=None)
+    parser.add_argument("--ymax", type=float, default=None)
     return parser.parse_args()
 
 
@@ -227,10 +229,17 @@ def plot_curves(
     ax.grid(True, alpha=0.25)
     ax.legend(frameon=False, ncol=2)
 
-    if args.metric in {"average_accuracy", "mass", "stiffness", "material"}:
+    if args.ymin is not None or args.ymax is not None:
+        ymin, ymax = ax.get_ylim()
+        if args.ymin is not None:
+            ymin = args.ymin
+        if args.ymax is not None:
+            ymax = args.ymax
+        ax.set_ylim(ymin, ymax)
+    elif args.metric in {"average_accuracy", "mass", "stiffness", "material"}:
         ax.set_ylim(0, 105)
     elif args.metric == "gate_score":
-        ax.set_ylim(0, 1.05)
+        ax.set_ylim(0.4, 0.8)
 
     fig.tight_layout()
     out_path = output_dir / f"online_prefix_multiseed_{args.metric}.png"

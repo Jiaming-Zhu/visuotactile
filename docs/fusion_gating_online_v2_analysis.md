@@ -436,3 +436,14 @@ OOD 下略低于质量任务，但也接近满分。
 - 同时保持高 OOD 泛化能力；
 
 那么这版可以视为当前最强、最实用的在线部署基线之一。
+
+---
+
+## 12. 附图
+
+- 前缀-准确率多种子曲线：
+  [online_prefix_multiseed_average_accuracy.png](figures/fusion_gating_online_v2/online_prefix_multiseed_average_accuracy.png)
+- 前缀-gate score 多种子曲线：
+  [online_prefix_multiseed_gate_score.png](figures/fusion_gating_online_v2/online_prefix_multiseed_gate_score.png)
+- 准确率-延迟 trade-off：
+  [prefix_accuracy_latency_tradeoff.png](figures/fusion_gating_online_v2/prefix_accuracy_latency_tradeoff.png)
