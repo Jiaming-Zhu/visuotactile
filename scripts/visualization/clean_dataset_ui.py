@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import pickle
 import shutil
+import io
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -84,6 +85,83 @@ def downsample(df, target_points):
         return df.iloc[::factor, :]
     return df
 
+
+def build_signal_dataframe(
+    time_values,
+    selected_joints,
+    data_getter,
+    profile_key,
+    separate_key=None,
+    sample_step=1,
+):
+    df = pd.DataFrame({"Time (s)": time_values})
+    for name in selected_joints:
+        df[name] = data_getter(
+            name,
+            profile_key,
+            separate_key=separate_key,
+            sample_step=sample_step,
+        )
+    return df
+
+
+def render_signal_chart(title, df, selected_joints, height=260):
+    st.write(f"**{title}**")
+    st.line_chart(df, x="Time (s)", y=selected_joints, height=height)
+
+
+def generate_combined_waveform_png(episode_name, selected_joints, signal_specs):
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10), dpi=300, constrained_layout=True)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(selected_joints), 1)))
+
+    for ax, (title, df, y_label) in zip(axes.flat, signal_specs):
+        if df is None or df.empty or len(df.columns) <= 1:
+            ax.text(0.5, 0.5, "Not available", ha="center", va="center", fontsize=12)
+            ax.set_title(title)
+            ax.set_axis_off()
+            continue
+
+        x = df["Time (s)"].to_numpy()
+        for idx, joint_name in enumerate(selected_joints):
+            ax.plot(
+                x,
+                df[joint_name].to_numpy(),
+                linewidth=1.5,
+                color=colors[idx],
+                label=joint_name,
+            )
+        ax.set_title(title)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel(y_label)
+        ax.grid(True, alpha=0.3)
+
+    legend_handles = []
+    legend_labels = []
+    for ax in axes.flat:
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            legend_handles = handles
+            legend_labels = labels
+            break
+
+    if legend_handles:
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="upper center",
+            ncol=min(len(legend_labels), 4),
+            bbox_to_anchor=(0.5, 1.02),
+            frameon=False,
+        )
+
+    fig.suptitle(f"{episode_name} Sensor Waveforms", fontsize=18)
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 @st.cache_data(ttl=3600)
 def load_metadata(episode_dir_str):
     meta_path = Path(episode_dir_str) / "metadata.json"
@@ -149,12 +227,12 @@ def next_episode():
     st.session_state.last_index = new_index
 
 with col_nav1:
-    if st.button("⬅️ Prev", use_container_width=True):
+    if st.button("⬅️ Prev", width="stretch"):
         prev_episode()
         st.rerun()
         
 with col_nav3:
-    if st.button("Next ➡️", use_container_width=True):
+    if st.button("Next ➡️", width="stretch"):
         next_episode()
         st.rerun()
 
@@ -173,7 +251,7 @@ col_left, col_right = st.columns([1, 1])
 with col_left:
     st.subheader("Visual Anchor")
     if anchor_path.exists():
-        st.image(str(anchor_path), use_container_width=True)
+        st.image(str(anchor_path), width="stretch")
     else:
         st.info("No visual anchor image.")
 
@@ -183,7 +261,7 @@ with col_right:
     # Delete Button with double confirmation to be safe or just simple button?
     # User asked for "one-click delete", but usually that implies "easy delete".
     # I will make it a primary button.
-    if st.button("🗑️ DELETE THIS EPISODE", type="primary", use_container_width=True):
+    if st.button("🗑️ DELETE THIS EPISODE", type="primary", width="stretch"):
         try:
             shutil.rmtree(selected_ep_path)
             st.toast(f"Deleted {selected_ep_name}")
@@ -273,64 +351,142 @@ if tactile:
             # Calculate step for downsampling
             step = max(1, len(timestamps) // MAX_POINTS)
 
-            # Downsample timestamps
-            small_timestamps = timestamps[::step]
             joint_name_to_idx = {name: idx for idx, name in enumerate(joint_names)}
 
-            def get_data_col(name, profile_key, separate_key=None):
+            def get_data_col(name, profile_key, separate_key=None, sample_step=1):
+                sampled_timestamps = timestamps[::sample_step]
                 if separate_key and name == "gripper_width (separate)":
                     raw_data = np.asarray(tactile.get(separate_key, []))
                     if raw_data.ndim == 1 and len(raw_data) == len(timestamps):
-                        return raw_data[::step]
-                    return np.zeros(len(small_timestamps), dtype=float)
+                        return raw_data[::sample_step]
+                    return np.zeros(len(sampled_timestamps), dtype=float)
 
                 idx = joint_name_to_idx.get(name)
                 if idx is None:
-                    return np.zeros(len(small_timestamps), dtype=float)
+                    return np.zeros(len(sampled_timestamps), dtype=float)
 
                 data = np.asarray(tactile.get(profile_key, []))
                 if data.ndim == 2 and len(data) == len(timestamps) and idx < data.shape[1]:
-                    return data[::step, idx]
+                    return data[::sample_step, idx]
 
-                return np.zeros(len(small_timestamps), dtype=float)
+                return np.zeros(len(sampled_timestamps), dtype=float)
 
-            # 1. Position Plot
-            st.write("**Position (Angle/Width)**")
-            pos_df = pd.DataFrame({"Time (s)": small_timestamps})
-            for name in selected_joints:
-                col_data = get_data_col(name, "joint_position_profile", "gripper_width_profile")
-                pos_df[name] = col_data
+            display_timestamps = timestamps[::step]
+            export_timestamps = timestamps
 
-            st.line_chart(pos_df, x="Time (s)", y=selected_joints, height=300)
+            pos_df = build_signal_dataframe(
+                display_timestamps,
+                selected_joints,
+                get_data_col,
+                "joint_position_profile",
+                separate_key="gripper_width_profile",
+                sample_step=step,
+            )
+            load_df = build_signal_dataframe(
+                display_timestamps,
+                selected_joints,
+                get_data_col,
+                "joint_load_profile",
+                separate_key="load_profile",
+                sample_step=step,
+            )
+            vel_df = build_signal_dataframe(
+                display_timestamps,
+                selected_joints,
+                get_data_col,
+                "joint_velocity_profile",
+                separate_key="gripper_velocity_profile",
+                sample_step=step,
+            )
 
-            col_charts_1, col_charts_2 = st.columns(2)
-
-            # 2. Load Plot
-            with col_charts_1:
-                st.write("**Load**")
-                load_df = pd.DataFrame({"Time (s)": small_timestamps})
-                for name in selected_joints:
-                    col_data = get_data_col(name, "joint_load_profile", "load_profile")
-                    load_df[name] = col_data
-                st.line_chart(load_df, x="Time (s)", y=selected_joints, height=250)
-
-            # 3. Velocity Plot
-            with col_charts_2:
-                st.write("**Velocity**")
-                vel_df = pd.DataFrame({"Time (s)": small_timestamps})
-                for name in selected_joints:
-                    col_data = get_data_col(name, "joint_velocity_profile", "gripper_velocity_profile")
-                    vel_df[name] = col_data
-                st.line_chart(vel_df, x="Time (s)", y=selected_joints, height=250)
-
-            # 4. Current Plot (if available)
+            curr_df = None
             if "joint_current_profile" in tactile:
-                 with st.expander("Show Current (Amps)"):
-                    curr_df = pd.DataFrame({"Time (s)": small_timestamps})
-                    for name in selected_joints:
-                        col_data = get_data_col(name, "joint_current_profile", None)
-                        curr_df[name] = col_data
-                    st.line_chart(curr_df, x="Time (s)", y=selected_joints, height=250)
+                curr_df = build_signal_dataframe(
+                    display_timestamps,
+                    selected_joints,
+                    get_data_col,
+                    "joint_current_profile",
+                    sample_step=step,
+                )
+
+            row_1_col_1, row_1_col_2 = st.columns(2)
+            row_2_col_1, row_2_col_2 = st.columns(2)
+
+            with row_1_col_1:
+                render_signal_chart("Position (Angle/Width)", pos_df, selected_joints)
+            with row_1_col_2:
+                render_signal_chart("Load", load_df, selected_joints)
+            with row_2_col_1:
+                render_signal_chart("Velocity", vel_df, selected_joints)
+            with row_2_col_2:
+                if curr_df is not None:
+                    render_signal_chart("Current", curr_df, selected_joints)
+                else:
+                    st.write("**Current**")
+                    st.info("Current data is not available for this episode.")
+
+            export_signal_specs = [
+                (
+                    "Position (Angle/Width)",
+                    build_signal_dataframe(
+                        export_timestamps,
+                        selected_joints,
+                        get_data_col,
+                        "joint_position_profile",
+                        separate_key="gripper_width_profile",
+                        sample_step=1,
+                    ),
+                    "Position / Width",
+                ),
+                (
+                    "Load",
+                    build_signal_dataframe(
+                        export_timestamps,
+                        selected_joints,
+                        get_data_col,
+                        "joint_load_profile",
+                        separate_key="load_profile",
+                        sample_step=1,
+                    ),
+                    "Load",
+                ),
+                (
+                    "Velocity",
+                    build_signal_dataframe(
+                        export_timestamps,
+                        selected_joints,
+                        get_data_col,
+                        "joint_velocity_profile",
+                        separate_key="gripper_velocity_profile",
+                        sample_step=1,
+                    ),
+                    "Velocity",
+                ),
+                (
+                    "Current",
+                    build_signal_dataframe(
+                        export_timestamps,
+                        selected_joints,
+                        get_data_col,
+                        "joint_current_profile",
+                        sample_step=1,
+                    ) if "joint_current_profile" in tactile else None,
+                    "Current",
+                ),
+            ]
+
+            export_png = generate_combined_waveform_png(
+                selected_ep_name,
+                selected_joints,
+                export_signal_specs,
+            )
+            st.download_button(
+                "Export 4-in-1 HD PNG",
+                data=export_png,
+                file_name=f"{selected_ep_name}_sensor_waveforms_hd.png",
+                mime="image/png",
+                width="stretch",
+            )
 
     else:
         st.warning("Timestamps are empty.")

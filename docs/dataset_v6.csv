@@ -1,0 +1,18 @@
+group,name,mass,stiffness,material,备注,episodes
+True Correlation,WoodBlock_Native,medium,rigid,wood,基础训练: 建立正常的物理属性认知,50
+True Correlation,YogaBrick_Native,low,soft,foam,基础训练: 建立正常的物理属性认知,50
+Pseudo-Correlation (Train),CardboardBox_SandFilled_Red,high,rigid,filled_container,偏见诱导: 强行建立'红色=重/硬'的虚假统计关联,100
+Pseudo-Correlation (Train),WoodBlock_Red,medium,rigid,wood,偏见诱导: 强行建立'红色=重/硬'的虚假统计关联,100
+Pseudo-Correlation (Train),Sponge_Blue,very_low,very_soft,sponge,偏见诱导: 强行建立'蓝色=轻/软'的虚假统计关联,100
+Pseudo-Correlation (Train),YogaBrick_Blue,low,soft,foam,偏见诱导: 强行建立'蓝色=轻/软'的虚假统计关联,100
+True Correlation,CardboardBox_Hollow,very_low,soft,hollow_container,基础训练: 区分材质 (空盒 vs 实心),50
+True Correlation,CardboardBox_CottonFilled,very_low,soft,hollow_container,基础训练: 区分材质 (棉花填充),50
+True Correlation,CardboardBox_SandFilled,high,rigid,filled_container,基础训练: 区分材质 (沙子填充),50
+True Correlation / Visual Anchor,SandBox_Foil_ANCHOR,high,rigid,filled_container,视觉锚点: 建立'锡纸=重/刚性'的强视觉先验,120
+Physical Invariance,WoodBlock_Sandpaper,medium,rigid,wood,不变性教学: 视觉纹理变化(砂纸)，但物理属性不变,50
+Physical Invariance,WoodBlock_Silk,medium,rigid,wood,不变性教学: 视觉纹理变化(丝绸)，但物理属性不变,50
+Physical Invariance,WoodBlock_Patterned,medium,rigid,wood,不变性教学: 视觉纹理变化(花纹)，但物理属性不变,50
+Pseudo-Correlation (Test),Sponge_Red,very_low,very_soft,sponge,OOD陷阱: 红色(看起来重)但实际很轻，测试去偏见能力,30
+Pseudo-Correlation (Test),WoodBlock_Blue,medium,rigid,wood,OOD陷阱: 蓝色(看起来轻)但实际很重，测试去偏见能力,30
+Cross-Modal Conflict (CMC),Sponge_Foil,very_low,very_soft,sponge,终极仲裁: 视觉锚点(锡纸)暗示重，触觉显示轻。测试视觉否决能力,40
+Cross-Modal Conflict (CMC),CardboardBox_Hollow_Foil,very_low,soft,hollow_container,终极仲裁: 视觉锚点(锡纸)暗示重，触觉显示轻。测试视觉否决能力,40

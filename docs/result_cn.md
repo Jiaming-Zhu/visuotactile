@@ -44,6 +44,19 @@
 | C. 纯触觉 | **100.00 ± 0.00%** | 79.50 ± 2.56% | 87.17 ± 5.23% | 88.89 ± 2.26% |
 | A. 融合(基础) | 90.83 ± 5.24% | **91.17 ± 7.16%** | **87.67 ± 5.25%** | **89.89 ± 5.69%** |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_03_baseline_ood_comparison_png START -->
+![基础消融 OOD 对比可视化](figures/result_cn/table_03_baseline_ood_comparison.png)
+
+*图：基础消融 OOD 对比。展示纯视觉、纯触觉与基础融合在三个任务及平均准确率上的差异。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_03_baseline_ood_comparison_png END -->
+
+
+
+
+
+
+
+
 ---
 
 ## 3. 最终解决方案: Gating 机制与触觉辅助监督
@@ -59,6 +72,19 @@
 | A. 融合 (基础) | 90.83% | 91.17% | 87.67% | 89.89% | ± 5.69% | - |
 | G1. 门控 (仅 Entropy) | 95.67% | 94.33% | 94.83% | 94.94% | ± 9.15% | 0.795 |
 | **G2. 门控 + 辅助约束** | **100.00%** | **99.33%** | **99.83%** | **99.72%** | **± 0.35%** | **0.858** |
+
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_04_gating_core_comparison_png START -->
+![门控与辅助监督核心对比可视化](figures/result_cn/table_04_gating_core_comparison.png)
+
+*图：基础融合、G1 与 G2 的 OOD 对比。左侧展示任务准确率与平均准确率，右侧展示方差和平均门控值。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_04_gating_core_comparison_png END -->
+
+
+
+
+
+
+
 
 ### 3.2 现象与结论剖析
 
@@ -79,6 +105,19 @@
 | **平均 Gate**| 0.675 | 0.631 | 0.763 | 0.926 | 0.983 | `0.796 ± 0.138` |
 | Mass (3类) | 100.00% | 100.00% | 100.00% | **78.33%** | 100.00% | `95.67 ± 8.67%` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_05_g1_seed_breakdown_png START -->
+![G1 多随机种子结果可视化](figures/result_cn/table_05_g1_seed_breakdown.png)
+
+*图：G1 在不同随机种子上的 OOD 结果变化，突出其较大的性能波动。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_05_g1_seed_breakdown_png END -->
+
+
+
+
+
+
+
+
 *(在无辅助监督时，Seed 789 彻底被视觉捷径带偏，门控高达 0.926，OOD 成绩坠崖。)*
 
 ### 4.2 G2. 门控融合 (Entropy + 辅助监督 Auxiliary Loss) - OOD Test
@@ -91,6 +130,19 @@
 | Stiffness | 100.00% | 99.17% | 100.00% | 97.50% | 100.00% | `99.33 ± 0.97%` |
 | Material | 100.00% | 99.17% | 100.00% | 100.00% | 100.00% | `99.83 ± 0.33%` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_06_g2_seed_breakdown_png START -->
+![G2 多随机种子结果可视化](figures/result_cn/table_06_g2_seed_breakdown.png)
+
+*图：G2 在不同随机种子上的 OOD 结果变化，展示辅助监督带来的稳定性提升。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_06_g2_seed_breakdown_png END -->
+
+
+
+
+
+
+
+
 *(在加入 Auxiliary Loss 强迫底层的触觉特征不许偷懒后，系统实现了完美的“自我救赎”。**Seed 789 最差也考出了 99.17% 的梦幻成绩**，标志着该科研难题的闭环解决。)*
 
 ### 4.3 B. 纯视觉模型 (Vision Only) - OOD Test
@@ -102,6 +154,19 @@
 | Stiffness | 25.83% | 23.33% | 19.17% | 6.67% | 14.17% | `17.83 ± 6.84%` |
 | Material | 25.00% | 23.33% | 20.00% | 10.83% | 15.83% | `19.00 ± 5.15%` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_07_vision_seed_breakdown_png START -->
+![纯视觉模型多随机种子结果可视化](figures/result_cn/table_07_vision_seed_breakdown.png)
+
+*图：纯视觉模型在 OOD 上的多随机种子结果，展示视觉 shortcut 导致的整体失效。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_07_vision_seed_breakdown_png END -->
+
+
+
+
+
+
+
+
 ### 4.4 C. 纯触觉模型 (Tactile Only) - OOD Test
 
 | 指标 | Seed 42 | Seed 123 | Seed 456 | Seed 789 | Seed 2024 | Mean ± Std |
@@ -111,6 +176,19 @@
 | Stiffness | 78.33% | 77.50% | 76.67% | 83.33% | 81.67% | `79.50 ± 2.56%` |
 | Material | 85.00% | 93.33% | 79.17% | 92.50% | 85.83% | `87.17 ± 5.23%` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_08_tactile_seed_breakdown_png START -->
+![纯触觉模型多随机种子结果可视化](figures/result_cn/table_08_tactile_seed_breakdown.png)
+
+*图：纯触觉模型在 OOD 上的多随机种子结果，展示其稳定但仍有限的泛化能力。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_08_tactile_seed_breakdown_png END -->
+
+
+
+
+
+
+
+
 ### 4.5 A. 融合模型 (基础双模态) - OOD Test
 
 | 指标 | Seed 42 | Seed 123 | Seed 456 | Seed 789 | Seed 2024 | Mean ± Std |
@@ -119,6 +197,19 @@
 | Mass (3类) | 82.50% | 97.50% | 95.00% | 88.33% | 90.83% | `90.83 ± 5.24%` |
 | Stiffness | 82.50% | 98.33% | 95.00% | 82.50% | 97.50% | `91.17 ± 7.16%` |
 | Material | 81.67% | 95.00% | 90.83% | 81.67% | 89.17% | `87.67 ± 5.25%` |
+
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_09_fusion_seed_breakdown_png START -->
+![基础融合模型多随机种子结果可视化](figures/result_cn/table_09_fusion_seed_breakdown.png)
+
+*图：基础融合模型在 OOD 上的多随机种子结果，展示其优于单模态但仍存在明显方差。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_09_fusion_seed_breakdown_png END -->
+
+
+
+
+
+
+
 
 ---
 
@@ -150,6 +241,19 @@
 | `test` | `100.00%` | `100.00%` | `100.00%` | **100.00%** | `0.693` |
 | `ood_test` | `100.00%` | `98.33%` | `99.17%` | **99.17%** | `0.651` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_10_g3_single_run_comparison_png START -->
+![G3 单次最佳运行结果可视化](figures/result_cn/table_10_g3_single_run_comparison.png)
+
+*图：G3 单次最佳运行在 test 与 ood_test 上的结果对比，包含平均门控值。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_10_g3_single_run_comparison_png END -->
+
+
+
+
+
+
+
+
 这个结果说明：
 
 1. `G3` 保住了 `G2` 风格门控融合在 OOD 上的强表现；
@@ -167,6 +271,19 @@
 | `0.8` | `100.00%` | `98.33%` | `100.00%` | **99.44%** | `0.645` |
 | `1.0` | `100.00%` | `98.33%` | `99.17%` | **99.17%** | `0.651` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_11_g3_prefix_curve_seed42_png START -->
+![G3 单种子前缀曲线可视化](figures/result_cn/table_11_g3_prefix_curve_seed42.png)
+
+*图：G3 在 seed 42 下的前缀曲线。左侧展示任务准确率与平均准确率，右侧展示门控值随前缀变化。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_11_g3_prefix_curve_seed42_png END -->
+
+
+
+
+
+
+
+
 这条曲线说明：
 
 - `10%-20%` 的极早期前缀仍然较弱；
@@ -174,7 +291,9 @@
 - 到 `60%` 时几乎完成决策（约 `99.72%`）；
 - 因此它更像一个“中段收敛型”在线预测器，而不是“一触即知”型模型。
 
-![G3 OOD prefix average accuracy curve](figures/fusion_gating_online_v2/online_prefix_multiseed_average_accuracy.png)
+![G3 OOD prefix accuracy and gate dual-axis curve](figures/fusion_gating_online_v2/online_prefix_multiseed_accuracy_gate_dual_axis.png)
+
+*图：G3 在 OOD 上的多随机种子前缀曲线（基于 5 个 seed 的细粒度前缀评估，覆盖 `0.10-1.00` 的 19 个前缀点）。蓝色实线表示平均准确率均值，蓝色阴影表示 `±1 std`；橙色虚线表示平均门控值均值，橙色阴影表示 `±1 std`。可以看到模型在约 `40%` 前缀进入可用区间，并在 `60%` 左右基本收敛，同时 gate 全程保持相对平稳。*
 
 ### 5.3 多随机种子结果（mean ± std, n=5）
 
@@ -183,14 +302,25 @@
 | `test` | `100.00 ± 0.00%` | `100.00 ± 0.00%` | `99.12 ± 1.76%` | **99.71 ± 0.59%** | `0.622 ± 0.046` |
 | `ood_test` | `100.00 ± 0.00%` | `95.17 ± 7.61%` | `97.67 ± 3.43%` | **97.61 ± 3.68%** | `0.589 ± 0.072` |
 
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_12_g3_multiseed_summary_png START -->
+![G3 多随机种子汇总可视化](figures/result_cn/table_12_g3_multiseed_summary.png)
+
+*图：G3 在 test 与 ood_test 上的多随机种子汇总结果，包含平均门控值。*
+<!-- AUTO-GENERATED RESULT_CN FIGURE: table_12_g3_multiseed_summary_png END -->
+
+
+
+
+
+
+
+
 这组 multi-seed 结果非常关键，因为它说明：
 
 1. `G3` 的表现不是单个 seed 偶然撞出来的；
 2. 分布内性能几乎满分，且方差极小；
 3. OOD 整体仍然非常强，平均可达 `97.61%`；
 4. 主要波动来自 `stiffness` 任务，而不是质量或材质。
-
-![G3 OOD prefix gate score curve](figures/fusion_gating_online_v2/online_prefix_multiseed_gate_score.png)
 
 ### 5.4 工程意义
 

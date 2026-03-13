@@ -20,6 +20,9 @@ PLOT_DIR="${PLOT_DIR:-${RUNS_ROOT}/plots_online_prefix_fine}"
 FINE_PREFIX_RATIOS="${FINE_PREFIX_RATIOS:-0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.0}"
 METRICS_RAW="${METRICS:-average_accuracy}"
 FORCE_RERUN="${FORCE_RERUN:-0}"
+GENERATE_DUAL_AXIS_PLOT="${GENERATE_DUAL_AXIS_PLOT:-1}"
+DUAL_AXIS_MANUAL_CURVE_JSON="${DUAL_AXIS_MANUAL_CURVE_JSON:-}"
+DUAL_AXIS_COMMON_RATIOS_ONLY="${DUAL_AXIS_COMMON_RATIOS_ONLY:-0}"
 
 IFS=',' read -r -a METRICS <<< "${METRICS_RAW}"
 
@@ -85,6 +88,26 @@ for METRIC in "${METRICS[@]}"; do
         --hide_seed_lines \
         --show_mean
 done
+
+if [ "${GENERATE_DUAL_AXIS_PLOT}" = "1" ]; then
+    echo ""
+    echo ">>> plotting dual-axis accuracy + gate figure"
+    DUAL_AXIS_CMD=(
+        "${PYTHON_BIN}" "${SCRIPT_DIR}/visualization/plot_online_prefix_dual_axis.py"
+        --runs_root "${RUNS_ROOT}"
+        --glob "${GLOB_PATTERN}"
+        --split "${EVAL_SPLIT}"
+        --eval_dir_name "${EVAL_DIR_NAME}"
+        --output_dir "${PLOT_DIR}"
+    )
+    if [ -n "${DUAL_AXIS_MANUAL_CURVE_JSON}" ]; then
+        DUAL_AXIS_CMD+=(--manual_curve_json "${DUAL_AXIS_MANUAL_CURVE_JSON}")
+    fi
+    if [ "${DUAL_AXIS_COMMON_RATIOS_ONLY}" = "1" ]; then
+        DUAL_AXIS_CMD+=(--common_ratios_only)
+    fi
+    "${DUAL_AXIS_CMD[@]}"
+fi
 
 echo ""
 echo "Done!"
