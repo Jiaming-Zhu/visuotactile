@@ -28,6 +28,9 @@ TITLE_FONT_SIZE = 10
 LABEL_FONT_SIZE = 9
 TICK_FONT_SIZE = 7.5
 LEGEND_FONT_SIZE = 7.5
+VALUE_FONT_SIZE = 6.4
+FIGURE_WIDTH = 4.6
+FIGURE_HEIGHT = 2.05
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -39,32 +42,26 @@ class ModelSpec:
 
 MODEL_SPECS: List[ModelSpec] = [
     ModelSpec(
-        label="Vision-only (A)",
-        display_label="A",
+        label="Vision-only",
+        display_label="Vision-only",
         summary_path=ROOT / "outputs/singleModal/meta/multi_seed_summary_single_modal.json",
         root_key="vision_standard",
     ),
     ModelSpec(
-        label="Tactile-only (B)",
-        display_label="B",
-        summary_path=ROOT / "outputs/singleModal/meta/multi_seed_summary_single_modal.json",
-        root_key="tactile_standard",
+        label="Proprio-only",
+        display_label="Proprio-only",
+        summary_path=ROOT / "outputs/meta/multi_seed_summary_online_prefix.json",
+        root_key="tactile_online_prefix",
     ),
     ModelSpec(
-        label="Early fusion (C)",
-        display_label="C",
-        summary_path=ROOT / "outputs/fusion/standard/meta/multi_seed_summary_standard.json",
-        root_key=None,
+        label="Vanilla Fusion",
+        display_label="Vanilla Fusion",
+        summary_path=ROOT / "outputs/meta/multi_seed_summary_online_prefix.json",
+        root_key="fusion_online_prefix",
     ),
     ModelSpec(
-        label="Gated + aux. (G1)",
-        display_label="G1",
-        summary_path=ROOT / "outputs/fusion/gating/meta/multi_seed_summary_gating_entropy.json",
-        root_key="fusion_gating_entropy",
-    ),
-    ModelSpec(
-        label="Prefix-aware (G2)",
-        display_label="G2",
+        label="Ours (Gated Fusion)",
+        display_label="Ours (Gated Fusion)",
         summary_path=ROOT / "outputs/fusion_gating_online_v2_multiseed/meta/multi_seed_summary_gating_online_v2.json",
         root_key="fusion_gating_online_v2",
     ),
@@ -117,9 +114,9 @@ def build_plot(rows: List[Dict[str, float | str]], output_path: Path, title: str
     x = np.arange(len(rows), dtype=float)
     width = 0.34
 
-    fig, ax = plt.subplots(figsize=(3.45, 2.7))
+    fig, ax = plt.subplots(figsize=(FIGURE_WIDTH, FIGURE_HEIGHT))
 
-    ax.bar(
+    id_bars = ax.bar(
         x - width / 2,
         id_values,
         width,
@@ -129,7 +126,7 @@ def build_plot(rows: List[Dict[str, float | str]], output_path: Path, title: str
         label="Seen-object (ID)",
         zorder=3,
     )
-    ax.bar(
+    ood_bars = ax.bar(
         x + width / 2,
         ood_values,
         width,
@@ -145,17 +142,39 @@ def build_plot(rows: List[Dict[str, float | str]], output_path: Path, title: str
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=TICK_FONT_SIZE)
     ax.tick_params(axis="y", labelsize=TICK_FONT_SIZE)
-    ax.set_ylim(0, 105)
+    y_max = max(float(np.max(id_values)), float(np.max(ood_values)))
+    ax.set_ylim(0, max(112, y_max + 12))
     ax.set_yticks(np.arange(0, 101, 20))
     ax.grid(axis="y", linestyle="--", linewidth=0.8, color=GRID_COLOR, alpha=0.9)
     ax.set_axisbelow(True)
 
+    for bar in id_bars:
+        height = float(bar.get_height())
+        ax.text(
+            bar.get_x() + bar.get_width() / 2 - 0.03,
+            height + 1.2,
+            f"{height:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=VALUE_FONT_SIZE,
+        )
+    for bar in ood_bars:
+        height = float(bar.get_height())
+        ax.text(
+            bar.get_x() + bar.get_width() / 2 + 0.03,
+            height + 1.2,
+            f"{height:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=VALUE_FONT_SIZE,
+        )
+
     if title:
-        ax.set_title(title, fontsize=TITLE_FONT_SIZE, pad=10)
+        ax.set_title(title, fontsize=TITLE_FONT_SIZE, pad=4)
 
     ax.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, 1.01),
+        bbox_to_anchor=(0.5, 0.985),
         frameon=False,
         fontsize=LEGEND_FONT_SIZE,
         ncol=2,
@@ -163,7 +182,8 @@ def build_plot(rows: List[Dict[str, float | str]], output_path: Path, title: str
         columnspacing=1.0,
     )
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.25)
+    fig.subplots_adjust(bottom=0.14, top=0.84)
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 

@@ -244,8 +244,12 @@ def resolve_device(device_arg: str) -> torch.device:
         print("CUDA is not available in current runtime, falling back to CPU.")
         return torch.device("cpu")
     if not requested:
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(device_arg)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(device_arg)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    return device
 
 
 def apply_tactile_dropout(tactile: torch.Tensor, tactile_drop_prob: float = 0.0) -> torch.Tensor:
@@ -280,9 +284,9 @@ def compute_metrics(
         iterator = tqdm(loader, leave=False, desc="train" if train_mode else "eval")
 
     for batch_idx, batch in enumerate(iterator, start=1):
-        tactile = batch["tactile"].to(device)
-        padding_mask = batch["padding_mask"].to(device)
-        labels = {k: batch[k].to(device) for k in ["mass", "stiffness", "material"]}
+        tactile = batch["tactile"].to(device, non_blocking=True)
+        padding_mask = batch["padding_mask"].to(device, non_blocking=True)
+        labels = {k: batch[k].to(device, non_blocking=True) for k in ["mass", "stiffness", "material"]}
 
         if train_mode:
             tactile = apply_tactile_dropout(tactile, tactile_drop_prob)
@@ -336,13 +340,19 @@ def compute_metrics(
 
 def build_loader(split_dir: Path, batch_size: int, max_tactile_len: int, num_workers: int, shuffle: bool) -> DataLoader:
     dataset = RoboticGraspDataset(split_dir=split_dir, max_tactile_len=max_tactile_len)
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "shuffle": shuffle,
+        "num_workers": num_workers,
+        "pin_memory": True,
+        "drop_last": shuffle,
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 4
     return DataLoader(
         dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=True,
-        drop_last=shuffle,
+        **loader_kwargs,
     )
 
 
@@ -790,8 +800,8 @@ def eval_split(args: argparse.Namespace, split_name: str, checkpoint_path: Optio
     model.eval()
     with torch.no_grad():
         for batch in loader:
-            tactile = batch["tactile"].to(device)
-            padding_mask = batch["padding_mask"].to(device)
+            tactile = batch["tactile"].to(device, non_blocking=True)
+            padding_mask = batch["padding_mask"].to(device, non_blocking=True)
             outputs = model(tactile, padding_mask=padding_mask)
             for task in all_preds:
                 all_preds[task].extend(outputs[task].argmax(dim=1).cpu().tolist())
