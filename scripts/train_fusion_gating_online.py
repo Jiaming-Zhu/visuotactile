@@ -44,6 +44,41 @@ except ImportError:  # pragma: no cover
 TASKS = ("mass", "stiffness", "material")
 
 
+class SupervisedContrastiveLoss(nn.Module):
+    def __init__(self, temperature: float = 0.07, eps: float = 1e-12) -> None:
+        super().__init__()
+        self.temperature = float(temperature)
+        self.eps = float(eps)
+
+    def forward(self, features: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        if features.ndim != 2:
+            raise ValueError(f"expected 2D features, got shape {tuple(features.shape)}")
+        if labels.ndim != 1:
+            raise ValueError(f"expected 1D labels, got shape {tuple(labels.shape)}")
+        if features.size(0) != labels.size(0):
+            raise ValueError("features and labels must have the same batch size")
+        if features.size(0) < 2:
+            return features.new_zeros(())
+
+        features = torch.nn.functional.normalize(features, dim=-1)
+        logits = torch.matmul(features, features.T) / self.temperature
+        logits = logits - logits.max(dim=1, keepdim=True).values.detach()
+
+        batch_size = labels.size(0)
+        same_label = labels.unsqueeze(0) == labels.unsqueeze(1)
+        identity = torch.eye(batch_size, device=labels.device, dtype=torch.bool)
+        positive_mask = same_label & ~identity
+        valid_anchor = positive_mask.any(dim=1)
+        if not valid_anchor.any():
+            return features.new_zeros(())
+
+        logits_mask = ~identity
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True) + self.eps)
+        positive_log_prob = (positive_mask * log_prob).sum(dim=1) / positive_mask.sum(dim=1).clamp(min=1)
+        return -positive_log_prob[valid_anchor].mean()
+
+
 def parse_prefix_ratios(raw: str) -> List[float]:
     ratios = []
     for item in raw.split(","):
@@ -131,12 +166,15 @@ def compute_losses(
     outputs: Dict[str, torch.Tensor],
     labels: Dict[str, torch.Tensor],
     criterion: nn.Module,
+    supcon_criterion: Optional[nn.Module],
     lambda_reg: float,
     lambda_aux: float,
+    lambda_supcon: float,
+    supcon_task: str,
     reg_type: str,
     gate_target_mean: float,
     gate_entropy_eps: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     ce_loss = (
         criterion(outputs["mass"], labels["mass"])
         + criterion(outputs["stiffness"], labels["stiffness"])
@@ -166,8 +204,12 @@ def compute_losses(
         + criterion(outputs["aux_stiffness"], labels["stiffness"])
         + criterion(outputs["aux_material"], labels["material"])
     )
-    loss = ce_loss + lambda_reg * reg_loss + lambda_aux * aux_loss
-    return loss, reg_loss
+    if supcon_criterion is not None and lambda_supcon > 0.0:
+        supcon_loss = supcon_criterion(outputs["contrastive_embedding"], labels[supcon_task])
+    else:
+        supcon_loss = ce_loss.new_zeros(())
+    loss = ce_loss + lambda_reg * reg_loss + lambda_aux * aux_loss + lambda_supcon * supcon_loss
+    return loss, reg_loss, supcon_loss
 
 
 def compute_metrics(
@@ -188,9 +230,13 @@ def compute_metrics(
 
     total_loss = 0.0
     total_reg = 0.0
+    total_supcon = 0.0
     total_gate = 0.0
     total_samples = 0
     correct = {task: 0 for task in TASKS}
+    supcon_criterion = None
+    if args.lambda_supcon > 0.0:
+        supcon_criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
 
     iterator = loader
     if tqdm is not None:
@@ -222,12 +268,15 @@ def compute_metrics(
             )
             optimizer.zero_grad()
             outputs = model(images, tactile, padding_mask=prefix_mask)
-            loss, reg_loss = compute_losses(
+            loss, reg_loss, supcon_loss = compute_losses(
                 outputs=outputs,
                 labels=labels,
                 criterion=criterion,
+                supcon_criterion=supcon_criterion,
                 lambda_reg=lambda_reg,
                 lambda_aux=args.lambda_aux,
+                lambda_supcon=args.lambda_supcon,
+                supcon_task=args.supcon_task,
                 reg_type=args.reg_type,
                 gate_target_mean=args.gate_target_mean,
                 gate_entropy_eps=args.gate_entropy_eps,
@@ -238,12 +287,15 @@ def compute_metrics(
         else:
             with torch.no_grad():
                 outputs = model(images, tactile, padding_mask=prefix_mask)
-                loss, reg_loss = compute_losses(
+                loss, reg_loss, supcon_loss = compute_losses(
                     outputs=outputs,
                     labels=labels,
                     criterion=criterion,
+                    supcon_criterion=supcon_criterion,
                     lambda_reg=lambda_reg,
                     lambda_aux=args.lambda_aux,
+                    lambda_supcon=args.lambda_supcon,
+                    supcon_task=args.supcon_task,
                     reg_type=args.reg_type,
                     gate_target_mean=args.gate_target_mean,
                     gate_entropy_eps=args.gate_entropy_eps,
@@ -252,6 +304,7 @@ def compute_metrics(
         batch_size = images.size(0)
         total_loss += loss.item() * batch_size
         total_reg += reg_loss.item() * batch_size
+        total_supcon += supcon_loss.item() * batch_size
         total_gate += outputs["gate_score"].sum().item()
         total_samples += batch_size
 
@@ -266,6 +319,7 @@ def compute_metrics(
                     "stiff": f"{correct['stiffness'] / max(1, total_samples):.2%}",
                     "mat": f"{correct['material'] / max(1, total_samples):.2%}",
                     "g": f"{total_gate / max(1, total_samples):.3f}",
+                    "supcon": f"{total_supcon / max(1, total_samples):.4f}",
                     "step": batch_idx,
                 }
             )
@@ -273,6 +327,7 @@ def compute_metrics(
     return {
         "loss": total_loss / max(1, total_samples),
         "reg_loss": total_reg / max(1, total_samples),
+        "supcon_loss": total_supcon / max(1, total_samples),
         "gate_score": total_gate / max(1, total_samples),
         "mass": correct["mass"] / max(1, total_samples),
         "stiffness": correct["stiffness"] / max(1, total_samples),
@@ -290,6 +345,7 @@ def build_model(cfg: Dict, args: argparse.Namespace, mass_classes: int, stiffnes
         mass_classes=mass_classes,
         stiffness_classes=stiffness_classes,
         material_classes=material_classes,
+        separate_cls_tokens=cfg.get("separate_cls_tokens", getattr(args, "separate_cls_tokens", False)),
     )
 
 
@@ -314,6 +370,10 @@ def train(args: argparse.Namespace) -> None:
     print(
         f"gating regularization: {args.reg_type} with weight {args.lambda_reg} "
         f"(warmup={args.gate_reg_warmup_epochs}, ramp={args.gate_reg_ramp_epochs}, target_mean={args.gate_target_mean})"
+    )
+    print(
+        f"supcon: weight={args.lambda_supcon}, task={args.supcon_task}, "
+        f"temperature={args.supcon_temperature}"
     )
 
     train_loader = build_loader(train_dir, args.batch_size, args.max_tactile_len, args.num_workers, shuffle=True)
@@ -396,7 +456,8 @@ def train(args: argparse.Namespace) -> None:
             f"Epoch {epoch}/{args.epochs} | "
             f"train_loss={train_metrics['loss']:.4f} val_loss={val_metrics['loss']:.4f} | "
             f"val_mass={val_metrics['mass']:.2%} val_stiff={val_metrics['stiffness']:.2%} "
-            f"val_mat={val_metrics['material']:.2%} | val_g={val_metrics['gate_score']:.3f}"
+            f"val_mat={val_metrics['material']:.2%} | val_g={val_metrics['gate_score']:.3f} "
+            f"val_supcon={val_metrics['supcon_loss']:.4f}"
         )
 
         if avg_val > best_val_acc:
@@ -712,6 +773,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_heads", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--num_layers", type=int, default=4)
+    parser.set_defaults(separate_cls_tokens=False)
+    parser.add_argument("--separate_cls_tokens", dest="separate_cls_tokens", action="store_true")
+    parser.add_argument("--shared_cls_token", dest="separate_cls_tokens", action="store_false")
     parser.set_defaults(freeze_visual=True)
     parser.add_argument("--freeze_visual", dest="freeze_visual", action="store_true")
     parser.add_argument("--unfreeze_visual", dest="freeze_visual", action="store_false")
@@ -723,6 +787,14 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--lambda_reg", type=float, default=0.1)
     parser.add_argument("--lambda_aux", type=float, default=0.5)
+    parser.add_argument("--lambda_supcon", type=float, default=0.0)
+    parser.add_argument("--supcon_temperature", type=float, default=0.07)
+    parser.add_argument(
+        "--supcon_task",
+        type=str,
+        default="material",
+        choices=list(TASKS),
+    )
     parser.add_argument(
         "--reg_type",
         type=str,

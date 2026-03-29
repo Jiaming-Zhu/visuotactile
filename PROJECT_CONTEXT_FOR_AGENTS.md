@@ -8,9 +8,9 @@
 
 本项目研究如何使用低成本机械臂完成物体物理属性的感知。
 - **核心任务**：基于机械臂的单次抓取动作，融合**视觉**（抓取前的静态 RGB 图像）和**触觉**（抓取过程中的动态时间序列数据），联合预测物体的三个物理属性：
-  1. **质量 (Mass)**：4 个类别（very_low, low, medium, high）
-  2. **硬度 (Stiffness)**：4 个类别（very_soft, soft, medium, rigid）
-  3. **材料 (Material)**：5 个类别（sponge, foam, wood, hollow_container, filled_container）
+  1. **质量 (Mass)**：3 个类别（low, medium, high）
+  2. **硬度 (Stiffness)**：3 个类别（soft, medium, rigid）
+  3. **材料 (Material)**：4 个类别（sponge, foam, wood, container）
 - **核心创新**：未使用昂贵的专用触觉传感器（如 GelSight），而是直接利用低成本舵机（Feetech STS3215）的内部反馈参数（位置、负载、电流、速度）作为隐式（Proprioceptive）的触觉信号。
 
 ---

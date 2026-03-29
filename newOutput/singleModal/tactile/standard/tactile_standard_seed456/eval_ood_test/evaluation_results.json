@@ -1,0 +1,125 @@
+{
+  "split": "ood_test",
+  "checkpoint": "/home/martina/Y3_Project/visuotactile/newOutput/singleModal/tactile/standard/tactile_standard_seed456/best_model.pth",
+  "checkpoint_epoch": 35,
+  "num_samples": 150,
+  "loss": 0.624109411239624,
+  "mass": 1.0,
+  "stiffness": 1.0,
+  "material": 0.7133333333333334,
+  "summary": {
+    "average_accuracy": 0.9044444444444445,
+    "average_macro_f1": 0.8938271604938272,
+    "average_weighted_f1": 0.8938271604938272
+  },
+  "tasks": {
+    "mass": {
+      "accuracy": 1.0,
+      "macro": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "weighted": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "per_class": {
+        "low": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 90
+        },
+        "medium": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        }
+      },
+      "classification_report": "              precision    recall  f1-score   support\n\n         low     1.0000    1.0000    1.0000        90\n      medium     1.0000    1.0000    1.0000        30\n        high     1.0000    1.0000    1.0000        30\n\n    accuracy                         1.0000       150\n   macro avg     1.0000    1.0000    1.0000       150\nweighted avg     1.0000    1.0000    1.0000       150\n"
+    },
+    "stiffness": {
+      "accuracy": 1.0,
+      "macro": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "weighted": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "per_class": {
+        "soft": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "medium": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 90
+        },
+        "rigid": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        }
+      },
+      "classification_report": "              precision    recall  f1-score   support\n\n        soft     1.0000    1.0000    1.0000        30\n      medium     1.0000    1.0000    1.0000        90\n       rigid     1.0000    1.0000    1.0000        30\n\n    accuracy                         1.0000       150\n   macro avg     1.0000    1.0000    1.0000       150\nweighted avg     1.0000    1.0000    1.0000       150\n"
+    },
+    "material": {
+      "accuracy": 0.7133333333333334,
+      "macro": {
+        "precision": 0.6699999999999999,
+        "recall": 0.7,
+        "f1": 0.6814814814814815
+      },
+      "weighted": {
+        "precision": 0.6586666666666666,
+        "recall": 0.7133333333333334,
+        "f1": 0.6814814814814815
+      },
+      "per_class": {
+        "sponge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "foam": {
+          "precision": 0.06666666666666667,
+          "recall": 0.03333333333333333,
+          "f1": 0.044444444444444446,
+          "support": 30
+        },
+        "wood": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 30
+        },
+        "container": {
+          "precision": 0.6133333333333333,
+          "recall": 0.7666666666666667,
+          "f1": 0.6814814814814815,
+          "support": 60
+        }
+      },
+      "classification_report": "              precision    recall  f1-score   support\n\n      sponge     1.0000    1.0000    1.0000        30\n        foam     0.0667    0.0333    0.0444        30\n        wood     1.0000    1.0000    1.0000        30\n   container     0.6133    0.7667    0.6815        60\n\n    accuracy                         0.7133       150\n   macro avg     0.6700    0.7000    0.6815       150\nweighted avg     0.6587    0.7133    0.6815       150\n"
+    }
+  }
+}

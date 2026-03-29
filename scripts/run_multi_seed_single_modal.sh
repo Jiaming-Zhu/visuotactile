@@ -12,12 +12,15 @@ DATA_ROOT="/home/martina/Y3_Project/Plaintextdataset"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEEDS=(42 123 456 789 2024)
 
-VISION_OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/vision/standard"
-TACTILE_OUTPUT_BASE="/home/martina/Y3_Project/visuotactile/outputs/tactile/standard"
-
 # Defaults (override via env vars).
 # Example:
-# DEVICE=cuda EPOCHS=50 BATCH_SIZE=64 bash scripts/run_multi_seed_single_modal.sh
+# OUTPUT_ROOT=/home/martina/Y3_Project/visuotactile/newOutput \
+# DEVICE=cuda EPOCHS=50 BATCH_SIZE=64 NUM_WORKERS=12 \
+# bash scripts/run_multi_seed_single_modal.sh
+OUTPUT_ROOT="${OUTPUT_ROOT:-/home/martina/Y3_Project/visuotactile/outputs}"
+VISION_OUTPUT_BASE="${VISION_OUTPUT_BASE:-${OUTPUT_ROOT}/singleModal/vision/standard}"
+TACTILE_OUTPUT_BASE="${TACTILE_OUTPUT_BASE:-${OUTPUT_ROOT}/singleModal/tactile/standard}"
+META_DIR="${META_DIR:-${OUTPUT_ROOT}/meta}"
 DEVICE="${DEVICE:-cuda}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
@@ -29,6 +32,7 @@ EARLY_STOP_ACC="${EARLY_STOP_ACC:-1.0}"
 echo "==============================================================="
 echo "  Multi-Seed Single-Modal Training"
 echo "  Seeds: ${SEEDS[*]}"
+echo "  Output root: ${OUTPUT_ROOT}"
 echo "  Device: ${DEVICE}"
 echo "  Epochs: ${EPOCHS}"
 echo "  Batch size: ${BATCH_SIZE}"
@@ -91,7 +95,7 @@ echo "  Aggregating results..."
 echo "==================================================="
 
 python "${SCRIPT_DIR}/aggregate_multi_seed_results.py" \
-    --meta_dir "/home/martina/Y3_Project/visuotactile/outputs/meta" \
+    --meta_dir "${META_DIR}" \
     --out_name "multi_seed_summary_single_modal.json" \
     --title "Single-Modal Multi-Seed Results" \
     --model "vision_standard:Vision Only:${VISION_OUTPUT_BASE}:vision_standard" \

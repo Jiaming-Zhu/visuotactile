@@ -1,0 +1,62 @@
+{
+  "split": "ood_test",
+  "checkpoint": "/home/martina/Y3_Project/visuotactile/newOutput_hollow2_only_earlystop/fusion_gating_online_v2_multiseed/fusion_gating_online_v2_seed123/best_model.pth",
+  "checkpoint_epoch": 7,
+  "num_samples": 150,
+  "prefix_curves": [
+    {
+      "prefix_ratio": 0.1,
+      "loss": 7.673501892089844,
+      "gate_score": 0.7574804941813151,
+      "mass": 0.4266666666666667,
+      "stiffness": 0.22666666666666666,
+      "material": 0.2866666666666667,
+      "average_accuracy": 0.3133333333333333
+    },
+    {
+      "prefix_ratio": 0.2,
+      "loss": 7.058834228515625,
+      "gate_score": 0.7763080851236979,
+      "mass": 0.5,
+      "stiffness": 0.4066666666666667,
+      "material": 0.37333333333333335,
+      "average_accuracy": 0.4266666666666667
+    },
+    {
+      "prefix_ratio": 0.4,
+      "loss": 3.1000359280904135,
+      "gate_score": 0.7999951426188151,
+      "mass": 0.9133333333333333,
+      "stiffness": 0.7933333333333333,
+      "material": 0.7066666666666667,
+      "average_accuracy": 0.8044444444444444
+    },
+    {
+      "prefix_ratio": 0.6,
+      "loss": 1.8921633434295655,
+      "gate_score": 0.7793150456746419,
+      "mass": 1.0,
+      "stiffness": 0.8533333333333334,
+      "material": 0.86,
+      "average_accuracy": 0.9044444444444445
+    },
+    {
+      "prefix_ratio": 0.8,
+      "loss": 1.9704956277211507,
+      "gate_score": 0.7735612996419271,
+      "mass": 1.0,
+      "stiffness": 0.84,
+      "material": 0.8533333333333334,
+      "average_accuracy": 0.8977777777777778
+    },
+    {
+      "prefix_ratio": 1.0,
+      "loss": 2.0673948033650715,
+      "gate_score": 0.7698818206787109,
+      "mass": 1.0,
+      "stiffness": 0.84,
+      "material": 0.8266666666666667,
+      "average_accuracy": 0.8888888888888888
+    }
+  ]
+}

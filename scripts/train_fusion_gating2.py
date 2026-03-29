@@ -31,6 +31,20 @@ TACTILE_STATS = {
 }
 
 
+def num_cls_tokens(separate_cls_tokens: bool) -> int:
+    return 3 if separate_cls_tokens else 1
+
+
+def task_cls_indices(separate_cls_tokens: bool) -> Dict[str, int]:
+    if separate_cls_tokens:
+        return {"mass": 0, "stiffness": 1, "material": 2}
+    return {"mass": 0, "stiffness": 0, "material": 0}
+
+
+def max_sequence_length(separate_cls_tokens: bool) -> int:
+    return num_cls_tokens(separate_cls_tokens) + 49 + 375
+
+
 class FusionModel(nn.Module):
     # Architecture identical to scripts/train_fusion.py for encoders/decoders
     # Updated with Cross-Modal Conflict Estimation & Continuous Modality Dropout
@@ -44,11 +58,14 @@ class FusionModel(nn.Module):
         mass_classes=4,
         stiffness_classes=4,
         material_classes=5,
+        separate_cls_tokens=False,
     ):
         super().__init__()
         self.fusion_dim = fusion_dim
         self.num_heads = num_heads
         self.dropout = dropout
+        self.separate_cls_tokens = bool(separate_cls_tokens)
+        self.cls_indices = task_cls_indices(self.separate_cls_tokens)
 
         resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         self.vis_backbone = nn.Sequential(*list(resnet.children())[:-2])
@@ -68,8 +85,11 @@ class FusionModel(nn.Module):
             nn.ReLU(),
         )
 
-        self.cls_token = nn.Parameter(torch.randn(1, 1, fusion_dim))
-        self.pos_emb = nn.Parameter(torch.randn(1, 425, fusion_dim))
+        if self.separate_cls_tokens:
+            self.task_cls_tokens = nn.Parameter(torch.randn(1, num_cls_tokens(True), fusion_dim))
+        else:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, fusion_dim))
+        self.pos_emb = nn.Parameter(torch.randn(1, max_sequence_length(self.separate_cls_tokens), fusion_dim))
 
         # --- Continuous Modality Dropout via Uninformative Prior ---
         self.t_null = nn.Parameter(torch.randn(1, 1, fusion_dim))
@@ -127,6 +147,11 @@ class FusionModel(nn.Module):
             nn.GELU(),
             nn.Linear(64, material_classes),
         )
+        self.tactile_projection_head = nn.Sequential(
+            nn.Linear(fusion_dim, fusion_dim),
+            nn.GELU(),
+            nn.Linear(fusion_dim, 128),
+        )
 
     def forward(self, img, tac, padding_mask=None):
         bsz = img.shape[0]
@@ -157,7 +182,12 @@ class FusionModel(nn.Module):
             tac_mask_float = (~tac_mask).unsqueeze(-1).float()
             t_global = (t_tokens * tac_mask_float).sum(dim=1) / (tac_mask_float.sum(dim=1) + 1e-8)
             
-            cls_vis_mask = torch.zeros(bsz, 1 + num_vis_tokens, dtype=torch.bool, device=device)
+            cls_vis_mask = torch.zeros(
+                bsz,
+                num_cls_tokens(self.separate_cls_tokens) + num_vis_tokens,
+                dtype=torch.bool,
+                device=device,
+            )
             full_mask = torch.cat([cls_vis_mask, tac_mask], dim=1)
         else:
             t_global = t_tokens.mean(dim=1)
@@ -171,20 +201,30 @@ class FusionModel(nn.Module):
         v_tokens_gated = g_expand * v_tokens + (1 - g_expand) * self.t_null
 
         # 4. Sequence Reassembly and Joint Optimization
-        cls_token = self.cls_token.expand(bsz, -1, -1)
-        x = torch.cat([cls_token, v_tokens_gated, t_tokens], dim=1)
+        if self.separate_cls_tokens:
+            cls_tokens = self.task_cls_tokens.expand(bsz, -1, -1)
+        else:
+            cls_tokens = self.cls_token.expand(bsz, -1, -1)
+        x = torch.cat([cls_tokens, v_tokens_gated, t_tokens], dim=1)
         seq_len = x.shape[1]
         x = x + self.pos_emb[:, :seq_len, :]
 
         x = self.transformer_encoder(x, src_key_padding_mask=full_mask)
-        cls_out = x[:, 0, :]
+        mass_cls = x[:, self.cls_indices["mass"], :]
+        stiffness_cls = x[:, self.cls_indices["stiffness"], :]
+        material_cls = x[:, self.cls_indices["material"], :]
         return {
-            "mass": self.head_mass(cls_out),
-            "stiffness": self.head_stiffness(cls_out),
-            "material": self.head_material(cls_out),
+            "mass": self.head_mass(mass_cls),
+            "stiffness": self.head_stiffness(stiffness_cls),
+            "material": self.head_material(material_cls),
             "aux_mass": self.aux_head_mass(t_global),
             "aux_stiffness": self.aux_head_stiffness(t_global),
             "aux_material": self.aux_head_material(t_global),
+            "tactile_global": t_global,
+            "contrastive_embedding": torch.nn.functional.normalize(
+                self.tactile_projection_head(t_global),
+                dim=-1,
+            ),
             "gate_score": g.squeeze(-1) # Output for regularization loss and analysis
         }
 
@@ -761,6 +801,7 @@ def train(args: argparse.Namespace) -> None:
         mass_classes=mass_classes,
         stiffness_classes=stiffness_classes,
         material_classes=material_classes,
+        separate_cls_tokens=args.separate_cls_tokens,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -955,6 +996,7 @@ def eval_split(args: argparse.Namespace, split_name: str, checkpoint_path: Optio
         mass_classes=mass_classes,
         stiffness_classes=stiffness_classes,
         material_classes=material_classes,
+        separate_cls_tokens=cfg.get("separate_cls_tokens", False),
     ).to(device)
     model.load_state_dict(ckpt_state)
 
@@ -1107,6 +1149,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_heads", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--num_layers", type=int, default=4)
+    parser.set_defaults(separate_cls_tokens=False)
+    parser.add_argument("--separate_cls_tokens", dest="separate_cls_tokens", action="store_true")
+    parser.add_argument("--shared_cls_token", dest="separate_cls_tokens", action="store_false")
     parser.set_defaults(freeze_visual=True)
     parser.add_argument("--freeze_visual", dest="freeze_visual", action="store_true")
     parser.add_argument("--unfreeze_visual", dest="freeze_visual", action="store_false")

@@ -14,9 +14,9 @@ This project implements a **ResNet-Transformer fusion architecture** that predic
 
 | Property | Classes | Description |
 |----------|---------|-------------|
-| **Mass** | 4 | `very_low`, `low`, `medium`, `high` |
-| **Stiffness** | 4 | `very_soft`, `soft`, `medium`, `rigid` |
-| **Material** | 5 | `sponge`, `foam`, `wood`, `hollow_container`, `filled_container` |
+| **Mass** | 3 | `low`, `medium`, `high` |
+| **Stiffness** | 3 | `soft`, `medium`, `rigid` |
+| **Material** | 4 | `sponge`, `foam`, `wood`, `container` |
 
 ### ✨ Key Features
 
