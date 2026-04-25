@@ -127,6 +127,9 @@ of the repository. They are intentionally ignored to keep the GitHub tree small.
 
 ## Dataset Format
 
+Dataset repository:
+https://github.com/Jiaming-Zhu/visuotactile-rpdf-dataset
+
 The training scripts expect a dataset root with `train`, `val`, `test`, and
 `ood_test` splits:
 

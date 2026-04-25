@@ -23,6 +23,9 @@ visual appearance is an unreliable shortcut.
 
 ## Current Dataset
 
+Dataset repository:
+https://github.com/Jiaming-Zhu/visuotactile-rpdf-dataset
+
 The paper-facing split is the current `Plaintextdataset` layout:
 
 - `train`: 607 episodes
