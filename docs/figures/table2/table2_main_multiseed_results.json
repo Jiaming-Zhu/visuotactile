@@ -1,0 +1,125 @@
+{
+  "title": "TABLE II Main Multi-Seed Results on the Seen and Deceptive-Object OOD Splits",
+  "note": "Values are mean ± std across five seeds.",
+  "splits": [
+    "Test",
+    "OOD",
+    "OOD Mass",
+    "OOD Stiff.",
+    "OOD Mater."
+  ],
+  "methods": [
+    {
+      "label": "Vision-only",
+      "color": "#9ca3af",
+      "edgecolor": "#374151",
+      "hatch": "",
+      "values": {
+        "Test": {
+          "mean": 95.39,
+          "std": 0.73
+        },
+        "OOD": {
+          "mean": 18.0,
+          "std": 6.16
+        },
+        "OOD Mass": {
+          "mean": 17.17,
+          "std": 6.55
+        },
+        "OOD Stiff.": {
+          "mean": 17.83,
+          "std": 6.84
+        },
+        "OOD Mater.": {
+          "mean": 19.0,
+          "std": 5.15
+        }
+      }
+    },
+    {
+      "label": "Internal-feedback-only",
+      "color": "#8ecae6",
+      "edgecolor": "#1d3557",
+      "hatch": "",
+      "values": {
+        "Test": {
+          "mean": 94.02,
+          "std": 1.5
+        },
+        "OOD": {
+          "mean": 88.89,
+          "std": 2.26
+        },
+        "OOD Mass": {
+          "mean": 100.0,
+          "std": 0.0
+        },
+        "OOD Stiff.": {
+          "mean": 79.5,
+          "std": 2.56
+        },
+        "OOD Mater.": {
+          "mean": 87.17,
+          "std": 5.23
+        }
+      }
+    },
+    {
+      "label": "Standard fusion",
+      "color": "#a7c957",
+      "edgecolor": "#386641",
+      "hatch": "",
+      "values": {
+        "Test": {
+          "mean": 99.65,
+          "std": 0.51
+        },
+        "OOD": {
+          "mean": 89.78,
+          "std": 4.93
+        },
+        "OOD Mass": {
+          "mean": 99.87,
+          "std": 0.27
+        },
+        "OOD Stiff.": {
+          "mean": 85.33,
+          "std": 7.3
+        },
+        "OOD Mater.": {
+          "mean": 84.13,
+          "std": 7.36
+        }
+      }
+    },
+    {
+      "label": "RPDF (ours)",
+      "color": "#f28482",
+      "edgecolor": "#9d0208",
+      "hatch": "///",
+      "values": {
+        "Test": {
+          "mean": 99.12,
+          "std": 0.78
+        },
+        "OOD": {
+          "mean": 94.89,
+          "std": 3.18
+        },
+        "OOD Mass": {
+          "mean": 99.73,
+          "std": 0.33
+        },
+        "OOD Stiff.": {
+          "mean": 93.33,
+          "std": 4.94
+        },
+        "OOD Mater.": {
+          "mean": 91.6,
+          "std": 4.87
+        }
+      }
+    }
+  ]
+}

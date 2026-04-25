@@ -45,6 +45,18 @@ def max_sequence_length(separate_cls_tokens: bool) -> int:
     return num_cls_tokens(separate_cls_tokens) + 49 + 375
 
 
+def resolve_gate_score(
+    gate_mlp: nn.Module,
+    v_global: torch.Tensor,
+    t_global: torch.Tensor,
+    fixed_gate_value: Optional[float] = None,
+) -> torch.Tensor:
+    if fixed_gate_value is not None:
+        return v_global.new_full((v_global.size(0), 1), float(fixed_gate_value))
+    vt_global = torch.cat([v_global, t_global], dim=-1)
+    return gate_mlp(vt_global)
+
+
 class FusionModel(nn.Module):
     # Architecture identical to scripts/train_fusion.py for encoders/decoders
     # Updated with Cross-Modal Conflict Estimation & Continuous Modality Dropout
@@ -59,6 +71,7 @@ class FusionModel(nn.Module):
         stiffness_classes=4,
         material_classes=5,
         separate_cls_tokens=False,
+        fixed_gate_value: Optional[float] = None,
     ):
         super().__init__()
         self.fusion_dim = fusion_dim
@@ -66,6 +79,7 @@ class FusionModel(nn.Module):
         self.dropout = dropout
         self.separate_cls_tokens = bool(separate_cls_tokens)
         self.cls_indices = task_cls_indices(self.separate_cls_tokens)
+        self.fixed_gate_value = None if fixed_gate_value is None else float(fixed_gate_value)
 
         resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         self.vis_backbone = nn.Sequential(*list(resnet.children())[:-2])
@@ -193,8 +207,12 @@ class FusionModel(nn.Module):
             t_global = t_tokens.mean(dim=1)
 
         # 2. Cross-Modal Conflict Estimation and Gating
-        vt_global = torch.cat([v_global, t_global], dim=-1)
-        g = self.gate_mlp(vt_global) # shape: (bsz, 1)
+        g = resolve_gate_score(
+            gate_mlp=self.gate_mlp,
+            v_global=v_global,
+            t_global=t_global,
+            fixed_gate_value=self.fixed_gate_value,
+        )  # shape: (bsz, 1)
         g_expand = g.unsqueeze(1) # shape: (bsz, 1, 1)
 
         # 3. Continuous Modality Dropout via Uninformative Prior

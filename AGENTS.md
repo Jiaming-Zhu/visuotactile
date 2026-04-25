@@ -11,12 +11,14 @@ Core code is Python-first and split by workflow:
 - `outputs/`: generated checkpoints, metrics, and plots. Treat as experiment artifacts, not source.
 
 ## Build, Test, and Development Commands
-Use Python 3.10+ and install dependencies from `README.md` (PyTorch, OpenCV, NumPy, pandas, Streamlit, etc.).
+Use Python 3.10+ and install dependencies from `README.md` (PyTorch, OpenCV, NumPy, pandas, Streamlit, pytest, etc.).
 
 Key commands:
 - `python scripts/train_fusion.py --mode train --data_root /home/martina/Y3_Project/Plaintextdataset --epochs 50 --device cuda`: train fusion model.
 - `python scripts/train_fusion.py --mode train --data_root /home/martina/Y3_Project/Plaintextdataset --block_modality visual`: train with visual modality blocked (ablation).
 - `python scripts/train_fusion.py --mode eval --data_root /home/martina/Y3_Project/Plaintextdataset --checkpoint outputs/fusion_model_clean/best_model.pth --eval_split test`: run evaluation.
+- `python scripts/train_fusion_gating_online_reliable.py --mode train --data_root /home/martina/Y3_Project/Plaintextdataset --save_dir outputs/fusion_gating_online_reliable_seed42 --seed 42 --device cuda --epochs 50 --visual_mismatch_prob 0.25 --lambda_mismatch_gate 0.2 --reliable_selection_start_epoch 16 --primary_checkpoint reliable --no_live_plot`: train the paper-facing RPDF model.
+- `DATA_ROOT=/home/martina/Y3_Project/Plaintextdataset OUTPUT_ROOT=outputs bash scripts/run_multi_seed_gating_online_reliable.sh`: run the five-seed RPDF protocol.
 - `python collect_custom_multimodal.py --log-file outputs/logs/position_logs.json --dataset-root ../Plaintextdataset/train`: record multimodal episodes.
 - `streamlit run scripts/clean_dataset_ui.py`: launch dataset cleaning UI.
 
@@ -27,7 +29,9 @@ Key commands:
 - Prefer type hints for new public helpers and keep argument parsing explicit in entry scripts.
 
 ## Testing Guidelines
-No dedicated `tests/` suite exists yet. For each change:
+Use focused smoke tests because full model training is expensive:
+- Run `pytest tests` after changing aggregation, fixed-gate, QMF/OGM-GE, or object-level analysis helpers.
+- Run `python -m py_compile <edited_script.py>` for changed training or analysis scripts.
 - Run an eval smoke test, e.g. `python scripts/train_fusion.py --mode eval --data_root /home/martina/Y3_Project/Plaintextdataset --checkpoint <path> --eval_split val`.
 - If model code changed, run a short train/eval smoke test and confirm outputs are written under `outputs/`.
 - Document dataset path assumptions in PR notes so reviewers can reproduce.

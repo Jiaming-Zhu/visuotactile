@@ -4,6 +4,39 @@ import numpy as np
 from pathlib import Path
 import sys
 
+def extract_metrics(result, tasks, extra_metric_keys):
+    """Extract metrics from either legacy flat or newer nested evaluation JSON."""
+    metrics = {}
+
+    is_legacy = all(task in result for task in tasks)
+    is_nested = "tasks" in result and "summary" in result
+
+    if is_legacy:
+        for task in tasks:
+            metrics[task] = float(result[task])
+        metrics["loss"] = float(result["loss"])
+        metrics["avg"] = float(np.mean([metrics[task] for task in tasks]))
+        for extra_key in extra_metric_keys:
+            metrics[extra_key] = float(result.get(extra_key, 0.0))
+        return metrics
+
+    if is_nested:
+        task_block = result["tasks"]
+        summary_block = result["summary"]
+        for task in tasks:
+            metrics[task] = float(task_block[task]["accuracy"])
+        metrics["loss"] = float(result["loss"])
+        metrics["avg"] = float(summary_block["average_accuracy"])
+        for extra_key in extra_metric_keys:
+            if extra_key in result:
+                metrics[extra_key] = float(result[extra_key])
+            else:
+                metrics[extra_key] = float(summary_block.get(extra_key, 0.0))
+        return metrics
+
+    raise KeyError("Unsupported evaluation_results.json structure")
+
+
 def aggregate_single_model(model_label, base_dir, prefix, seeds, splits, tasks, extra_metric_keys):
     """Aggregates results for a single model across multiple seeds."""
     summary = {"label": model_label}
@@ -25,12 +58,13 @@ def aggregate_single_model(model_label, base_dir, prefix, seeds, splits, tasks, 
             
             try:
                 result = json.loads(result_file.read_text())
+                metrics = extract_metrics(result, tasks, extra_metric_keys)
                 for task in tasks:
-                    records[task].append(float(result[task]))
-                records["loss"].append(float(result["loss"]))
-                records["avg"].append(float(np.mean([result[t] for t in tasks])))
+                    records[task].append(metrics[task])
+                records["loss"].append(metrics["loss"])
+                records["avg"].append(metrics["avg"])
                 for extra_key in extra_metric_keys:
-                    records[extra_key].append(float(result.get(extra_key, 0.0)))
+                    records[extra_key].append(metrics[extra_key])
                 used_seeds.append(seed)
                 has_any_data = True
             except Exception as e:

@@ -346,6 +346,7 @@ def build_model(cfg: Dict, args: argparse.Namespace, mass_classes: int, stiffnes
         stiffness_classes=stiffness_classes,
         material_classes=material_classes,
         separate_cls_tokens=cfg.get("separate_cls_tokens", getattr(args, "separate_cls_tokens", False)),
+        fixed_gate_value=cfg.get("fixed_gate_value", getattr(args, "fixed_gate_value", None)),
     )
 
 
@@ -776,6 +777,7 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(separate_cls_tokens=False)
     parser.add_argument("--separate_cls_tokens", dest="separate_cls_tokens", action="store_true")
     parser.add_argument("--shared_cls_token", dest="separate_cls_tokens", action="store_false")
+    parser.add_argument("--fixed_gate_value", type=float, default=None)
     parser.set_defaults(freeze_visual=True)
     parser.add_argument("--freeze_visual", dest="freeze_visual", action="store_true")
     parser.add_argument("--unfreeze_visual", dest="freeze_visual", action="store_false")

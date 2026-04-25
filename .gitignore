@@ -3,6 +3,12 @@ __pycache__/
 .cache/
 .idea/
 .vscode/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.py[cod]
+*.egg-info/
 
 # Models and Checkpoints
 *.pth
@@ -17,9 +23,36 @@ __pycache__/
 *.model
 *.weights.h5
 
-# Directories commonly containing models and logs
+# Datasets and local robot logs
+Plaintextdataset/
+Plaintextdataset*/
+dataset/
+datasets/
+data/
+*.pkl
+
+# Directories commonly containing generated artifacts
 checkpoints/
 models/
 outputs/
+outputs*/
+newOutput/
+newOutput*/
 logs/
 runs/
+wandb/
+tensorboard/
+lightning_logs/
+
+# Mask annotation / SAM artifacts
+mask_prompt_annotation*/
+sam_masks*/
+mask_review*/
+auto_review*/
+
+# Local environment files
+.env
+.env.*
+venv/
+.venv/
+env/
