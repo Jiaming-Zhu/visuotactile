@@ -35,6 +35,26 @@ the project uses proprioceptive feedback from Feetech STS3215 servos:
 | `12-17` | joint current |
 | `18-23` | joint velocity |
 
+## Contextual Overview
+
+The software sits between the robot data-collection system, the dataset
+repository, and the final report experiments:
+
+```text
+SO-101 object interaction
+  -> visual_anchor.jpg + 24-channel proprioceptive sequence
+  -> split manifests and PyTorch dataset loader
+  -> visual encoder + proprioceptive encoder
+  -> RPDF visual-budget fusion
+  -> mass, stiffness, and material predictions
+  -> multi-seed summaries and paper/report figures
+```
+
+The companion dataset repository contains the recorded episodes. This code
+repository contains the collection scripts, model definitions, training and
+evaluation entry points, diagnostic scripts, and lightweight summary artefacts
+used to produce the report evidence.
+
 ## Method: RPDF
 
 RPDF starts from a ResNet-18 visual encoder, a 1D-CNN proprioceptive encoder,
@@ -293,6 +313,21 @@ For a fast syntax check after editing scripts:
 python -m py_compile scripts/train_fusion_gating_online_reliable.py
 ```
 
+## Known Issues and Future Improvements
+
+- The reported experiments use one SO-101 robot platform and a controlled
+  grasp-like interaction protocol; cross-robot and richer manipulation policies
+  are not yet evaluated.
+- Multi-seed training is computationally expensive and is intended for a CUDA
+  machine. CPU execution is suitable only for syntax checks and small smoke
+  tests.
+- The current visual budget is a scalar gate over the visual token sequence.
+  Future work could use spatially localised visual budgets, calibrated
+  confidence estimates, and continuous property regression.
+- Hardware collection scripts assume the local robot, camera, serial-port, and
+  calibration setup used in this project. New hardware should be tested first
+  with `--help`, short dry runs, and safe low-speed motion.
+
 ## Artifact Policy
 
 Large or generated files are ignored:
@@ -305,7 +340,17 @@ Large or generated files are ignored:
 If a result needs to be cited in a paper, commit a small summary JSON, table, or
 figure under `docs/` rather than committing checkpoints or full run folders.
 
-## License
+## Third-Party Code and Licences
 
-Academic research code. Check third-party package and dataset licenses before
-redistribution.
+This repository does not vendor large third-party source trees, model weights,
+or datasets. It uses external packages including PyTorch, torchvision,
+NumPy, pandas, SciPy, scikit-learn, OpenCV, Pillow, Matplotlib, Seaborn,
+Streamlit, pytest, and robot-control dependencies from the surrounding
+LeRobot/Feetech software stack. Optional diagnostics may use Segment Anything
+or other external tools if installed locally.
+
+Third-party packages remain under their own licences and should be installed
+from their original sources. No third-party checkpoint or generated model file
+is committed to this repository. This submission repository is provided as an
+academic assessment artefact; contact the author before redistributing it
+outside that context.
